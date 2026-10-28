@@ -139,11 +139,17 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function fromBase64(data: string): Uint8Array {
+/** Decoded base64, in its own ArrayBuffer (what `Blob` takes). */
+export function base64ToBuffer(data: string): ArrayBuffer {
   const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
+  return buffer;
+}
+
+export function fromBase64(data: string): Uint8Array {
+  return new Uint8Array(base64ToBuffer(data));
 }
 
 function union(a: Rect, b: Rect): Rect {

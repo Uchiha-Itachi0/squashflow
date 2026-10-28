@@ -9,7 +9,7 @@ import type { ScreenshotType } from "@squashflow/shared";
 import {
   cropBox,
   encodeWithinCap,
-  fromBase64,
+  base64ToBuffer,
   type ScreenshotReply,
   type ScreenshotRequest,
   type Size,
@@ -28,7 +28,7 @@ export async function captureRegion(
   try {
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     if (!dataUrl.startsWith(DATA_URL_PREFIX)) throw new Error("unexpected capture format");
-    const bytes = fromBase64(dataUrl.slice(DATA_URL_PREFIX.length));
+    const bytes = base64ToBuffer(dataUrl.slice(DATA_URL_PREFIX.length));
     const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
     try {
       return await cropAndEncode(image, request);

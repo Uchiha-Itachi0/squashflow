@@ -16,7 +16,7 @@ import {
   type Screenshot,
   type ScreenshotReference,
 } from "@squashflow/shared";
-import { fromBase64 } from "../capture/screenshot";
+import { base64ToBuffer } from "../capture/screenshot";
 import { newPinId, type StoredPin } from "../store/pins";
 
 export const ON_CLIPBOARD =
@@ -158,7 +158,7 @@ function screenshotReferences(pins: readonly StoredPin[], where: string): Screen
 
 /** The clipboard takes PNG only, so a JPEG screenshot is redrawn as PNG. */
 async function pngBlob(screenshot: Screenshot): Promise<Blob> {
-  const blob = new Blob([fromBase64(screenshot.data)], { type: screenshot.type });
+  const blob = new Blob([base64ToBuffer(screenshot.data)], { type: screenshot.type });
   if (screenshot.type === "image/png") return blob;
   const image = await createImageBitmap(blob);
   try {
