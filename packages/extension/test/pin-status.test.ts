@@ -124,6 +124,66 @@ describe("pin status reducer", () => {
     expect(Object.keys(forgetPin(sent, A))).toEqual([B]);
   });
 
+  it("keeps a history of what happened: sent, each new status, resolve and reopen", () => {
+    const sent = trackSent({}, [A], record(), 10);
+    const seen = applyRecord(
+      sent,
+      record({
+        status: "seen",
+        statusLabel: "Seen by Claude",
+        revision: 1,
+        updatedAt: "2026-10-28T00:01:00.000Z",
+      }),
+      20,
+    );
+    // The same status again adds nothing.
+    const again = applyRecord(
+      seen,
+      record({ status: "seen", statusLabel: "Seen by Claude", revision: 1 }),
+      21,
+    );
+    const done = setResolved(applyRecord(again, fixed, 30), A, true, 40);
+    expect(at(done, A).events.map((event) => [event.kind, event.label])).toEqual([
+      ["sent", "Sent to web"],
+      ["seen", "Seen by Claude"],
+      ["fixed", "Fixed"],
+      ["resolved", "Resolved"],
+    ]);
+    // Status lines take the helper's time, the same clock as Claude's replies.
+    expect(at(done, A).events[1]?.at).toBe(Date.parse("2026-10-28T00:01:00.000Z"));
+    expect(at(done, A).sessionPid).toBe(42);
+  });
+
+  it("a follow-up follows the new message and keeps the earlier replies and history", () => {
+    const answered = applyRecord(trackSent({}, [A], record(), 10), fixed, 20);
+    const next = record({ id: "sf-ffffffffffff", sessionName: "web" });
+    const followed = trackSent(answered, [A], next, 30, "Darker please");
+    expect(at(followed, A)).toMatchObject({
+      messageId: "sf-ffffffffffff",
+      status: "sent",
+      thread: [],
+      earlier: [reply],
+      inFlight: true,
+    });
+    expect(at(followed, A).events.map((event) => event.kind)).toEqual([
+      "sent",
+      "fixed",
+      "follow-up",
+      "sent",
+    ]);
+    expect(at(followed, A).events[2]).toMatchObject({ text: "Darker please", at: 30 });
+  });
+
+  it("reads statuses stored before the history was kept", async () => {
+    const legacy = { ...at(trackSent({}, [A], record(), 10), A) } as Record<string, unknown>;
+    delete legacy.events;
+    delete legacy.earlier;
+    delete legacy.sessionPid;
+    const area = memoryArea({ [PIN_STATUS_KEY]: { [A]: legacy } });
+    const read = await new PinStatusStore(area).list();
+    expect(at(read, A)).toMatchObject({ events: [], earlier: [], sessionPid: null });
+  });
+
   it("keeps at most the most recently updated pins", () => {
     let statuses: PinStatuses = {};
     for (let index = 0; index <= MAX_TRACKED_PINS; index += 1) {
@@ -145,8 +205,10 @@ describe("pin status reducer", () => {
   });
 });
 
-function memoryArea(): StorageAreaLike & { data: Record<string, unknown> } {
-  const data: Record<string, unknown> = {};
+function memoryArea(
+  initial: Record<string, unknown> = {},
+): StorageAreaLike & { data: Record<string, unknown> } {
+  const data: Record<string, unknown> = { ...initial };
   return {
     data,
     get: (key) => Promise.resolve(key in data ? { [key]: data[key] } : {}),

@@ -32,19 +32,23 @@
     "permissions": [
       "activeTab",
       "scripting",
+      "sidePanel",
       "storage",
       "unlimitedStorage"
     ],
     "action": {
-      "default_title": "Squashflow: toggle pin mode"
+      "default_title": "Squashflow: open the panel and pin on this page"
     },
     "commands": {
       "_execute_action": {
         "suggested_key": {
           "default": "Alt+Shift+P"
         },
-        "description": "Toggle pin mode on the current page"
+        "description": "Open Squashflow and pin on the current page"
       }
+    },
+    "side_panel": {
+      "default_path": "sidepanel.html"
     }
   }
 }

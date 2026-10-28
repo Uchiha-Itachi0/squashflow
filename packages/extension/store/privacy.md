@@ -8,7 +8,7 @@ When you turn pin mode on in a tab and place a pin, the extension captures, from
 
 - your comment;
 - page context for the pinned element: a selector, its text, some attributes, computed styles and the surrounding structure, positions and the viewport size;
-- a screenshot of the pinned region of the visible tab, unless you untick **Include screenshot**. A screenshot shows what is on screen, including anything visible in that region.
+- a screenshot of the pinned region of the visible tab, unless you untick **Attach a screenshot**. A screenshot shows what is on screen, including anything visible in that region.
 
 It never captures the value of any form field (typed or default, including password and hidden fields) as text, and it captures nothing from tabs where you have not turned pin mode on.
 

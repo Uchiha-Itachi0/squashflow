@@ -1,15 +1,22 @@
 /**
- * Sending pins to a Claude Code session from the panel: pairing, the session picker
- * and preview-then-send, also for follow-ups to a pin blocked on GitHub access. All helper calls go through the service worker. When the
- * helper is not running, not paired, or no session fits, copy stays available and the
- * panel says why.
+ * Sending pins to a Claude Code session from the side panel: pairing, the session picker
+ * and preview-then-send, also for the user's follow-ups on a sent pin and the follow-ups
+ * to a pin blocked on GitHub access. All helper calls go through the service worker.
+ * When the helper is not running, not paired, or no session fits, copy stays available
+ * and the panel says why.
  */
 
-import { DEFAULT_HELPER_PORT, type FollowUpAction, type PublicSession } from "@squashflow/shared";
+import {
+  DEFAULT_HELPER_PORT,
+  MAX_COMMENT_CHARS,
+  type FollowUpAction,
+  type PublicSession,
+} from "@squashflow/shared";
 import type { HelperFailure } from "../helper/errors";
 import { matchSessions } from "../helper/matching";
 import type { AskWorker, ConnectionStatus } from "../helper/messages";
 import type { OutgoingPins } from "../helper/client";
+import type { PinTracking } from "../status/pin-status";
 import type { StoredPin } from "../store/pins";
 
 export type ConnectionView = { state: "checking"; port: number } | ConnectionStatus;
@@ -28,6 +35,8 @@ export interface PinsPreview extends PreviewBase {
   outgoing: OutgoingPins;
   /** The extension's own ids of the pins in the message, in order. */
   localPinIds: readonly string[];
+  /** Set for the user's follow-up on one sent pin: what they typed. */
+  followUp: string | null;
 }
 
 /** A follow-up about to be sent to the session that has the pin. */
@@ -68,8 +77,8 @@ export interface SendState {
 
 export interface SendFlowHooks {
   ask: AskWorker;
-  /** The page the pins are on, without its fragment. */
-  pageUrl: () => string;
+  /** The page the pins are on, without its fragment; null with no page open. */
+  pageUrl: () => string | null;
   onChange: () => void;
   report: (text: string, outcome: "ok" | "error") => void;
 }
@@ -162,12 +171,10 @@ export class SendFlow {
   /** Remember the chosen session's repository for this site, or forget the site. */
   async rememberSite(remember: boolean): Promise<void> {
     const repo = remember ? (this.target?.repo ?? null) : null;
+    const pageUrl = this.hooks.pageUrl();
+    if (pageUrl === null) return;
     await this.busy(async () => {
-      const reply = await this.hooks.ask({
-        type: "remember-site",
-        pageUrl: this.hooks.pageUrl(),
-        repo,
-      });
+      const reply = await this.hooks.ask({ type: "remember-site", pageUrl, repo });
       if (!reply.ok) {
         this.fail(reply.failure);
         return;
@@ -179,23 +186,65 @@ export class SendFlow {
   /** Ask the helper for the exact message; nothing is delivered until `confirm`. */
   async preview(pins: readonly StoredPin[]): Promise<void> {
     const session = this.target;
-    if (session === null || pins.length === 0) return;
+    const [first] = pins;
+    if (session === null || first === undefined) return;
     const outgoing: OutgoingPins = {
       session: session.pid,
-      pageUrl: this.hooks.pageUrl(),
+      pageUrl: first.pageUrl,
       pins: pins.map(({ comment, context, screenshot }) =>
         screenshot === undefined ? { comment, context } : { comment, context, screenshot },
       ),
     };
+    await this.previewOutgoing(
+      outgoing,
+      pins.map((pin) => pin.id),
+      session.name,
+      null,
+    );
+  }
+
+  /**
+   * The user's follow-up on a sent pin, from the thread's composer: a new message about
+   * the same element, to the session that has the pin, previewed like any pin. It names
+   * the earlier message so the session can connect the two.
+   */
+  async previewReply(pin: StoredPin, tracking: PinTracking, text: string): Promise<void> {
+    const reply = text.trim();
+    if (reply === "") return;
+    const session =
+      this.current.sessions.find((candidate) => candidate.pid === tracking.sessionPid) ??
+      this.current.sessions.find((candidate) => candidate.name === tracking.sessionName);
+    if (this.current.connection.state !== "paired" || session === undefined) {
+      this.hooks.report(
+        `claude@${tracking.sessionName} is not running any more. Copy the pin instead, or send it again to another session.`,
+        "error",
+      );
+      return;
+    }
+    const outgoing: OutgoingPins = {
+      session: session.pid,
+      pageUrl: pin.pageUrl,
+      pins: [
+        { comment: followUpComment(tracking.messageId, pin.comment, reply), context: pin.context },
+      ],
+    };
+    await this.previewOutgoing(outgoing, [pin.id], session.name, reply);
+  }
+
+  private async previewOutgoing(
+    outgoing: OutgoingPins,
+    localPinIds: readonly string[],
+    sessionName: string,
+    followUp: string | null,
+  ): Promise<void> {
     await this.busy(async () => {
       const reply = await this.hooks.ask({ type: "preview", outgoing });
       if (!reply.ok) {
         this.fail(reply.failure);
         return;
       }
-      const localPinIds = pins.map((pin) => pin.id);
       this.update({
-        preview: { kind: "pins", outgoing, localPinIds, sessionName: session.name, ...reply.value },
+        preview: { kind: "pins", outgoing, localPinIds, followUp, sessionName, ...reply.value },
       });
     });
   }
@@ -241,6 +290,7 @@ export class SendFlow {
         pinId: preview.pinId,
         digest: preview.digest,
         localPinIds: [...preview.localPinIds],
+        ...(preview.followUp === null ? {} : { followUp: preview.followUp }),
       });
       this.update({ preview: null });
       if (!reply.ok) {
@@ -248,7 +298,8 @@ export class SendFlow {
         return;
       }
       const count = preview.outgoing.pins.length;
-      const what = count === 1 ? "1 pin" : `${count} pins`;
+      const what =
+        preview.followUp !== null ? "your reply" : count === 1 ? "1 pin" : `${count} pins`;
       this.hooks.report(`Sent ${what} to claude@${reply.value.sessionName}.`, "ok");
     });
   }
@@ -336,6 +387,17 @@ export class SendFlow {
     this.current = { ...this.current, ...patch };
     this.hooks.onChange();
   }
+}
+
+/** Most characters of the earlier comment quoted in a follow-up. */
+const QUOTED_COMMENT_CHARS = 300;
+
+/** The comment a follow-up carries: which earlier message it continues, then the reply. */
+export function followUpComment(messageId: string, earlier: string, reply: string): string {
+  const quoted =
+    earlier.length > QUOTED_COMMENT_CHARS ? `${earlier.slice(0, QUOTED_COMMENT_CHARS)}…` : earlier;
+  const lead = `Follow-up to Squashflow pin [${messageId}] on the same element (earlier comment: "${quoted}"):`;
+  return `${lead}\n\n${reply}`.slice(0, MAX_COMMENT_CHARS);
 }
 
 function sessionsNote(

@@ -2,8 +2,8 @@
  * The service worker's follow-up on sent pins. It stores each sent pin's status and
  * thread, keeps the helper's `/events` stream open while any pin is in flight, and
  * re-reads `GET /pins/{id}` whenever it (re)starts, because a Manifest V3 service worker
- * is stopped when idle and loses its stream; the pin mode script asks it to sync while
- * a page with pins in flight is open.
+ * is stopped when idle and loses its stream; the side panel asks it to sync while it is
+ * open and a pin is in flight.
  */
 
 import type { PinRecord } from "@squashflow/shared";
@@ -42,9 +42,13 @@ export class StatusTracker {
     this.now = options.now ?? Date.now;
   }
 
-  /** Start following the pins just delivered together in one message. */
-  async sent(localPinIds: readonly string[], record: PinRecord): Promise<void> {
-    await this.change((statuses) => trackSent(statuses, localPinIds, record, this.now()));
+  /** Start following the pins just delivered together in one message, or a follow-up. */
+  async sent(
+    localPinIds: readonly string[],
+    record: PinRecord,
+    followUp: string | null = null,
+  ): Promise<void> {
+    await this.change((statuses) => trackSent(statuses, localPinIds, record, this.now(), followUp));
     await this.follow();
   }
 

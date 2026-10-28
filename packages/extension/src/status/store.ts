@@ -1,7 +1,7 @@
 /**
  * Sent pins' statuses and threads in extension local storage, under one key, by the
  * extension's own pin id. Only the service worker writes it, one change at a time; the
- * pin mode script reads it and listens for changes. What is read back is validated,
+ * side panel and the pin mode script read it and listen for changes. What is read back is validated,
  * and entries that fail validation are dropped.
  */
 
@@ -49,7 +49,7 @@ export class PinStatusStore {
   }
 }
 
-/** Where the pin mode script reads statuses from, and hears about changes. */
+/** Where the side panel and the pin mode script read statuses from, and hear about changes. */
 export interface StatusSource {
   read(): Promise<PinStatuses>;
   watch(onChange: (statuses: PinStatuses) => void): () => void;

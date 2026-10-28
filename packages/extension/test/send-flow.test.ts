@@ -2,8 +2,9 @@ import type { PublicSession } from "@squashflow/shared";
 import { describe, expect, it } from "vitest";
 import type { HelperFailure } from "../src/helper/errors";
 import type { AskWorker, WorkerReplies, WorkerRequest } from "../src/helper/messages";
-import { SendFlow } from "../src/pin-mode/send-flow";
-import { sessionTimes } from "../src/ui/send-view";
+import { followUpComment, SendFlow } from "../src/panel/send-flow";
+import type { PinTracking } from "../src/status/pin-status";
+import { sessionTimes } from "../src/panel/format";
 import type { StoredPin } from "../src/store/pins";
 
 const PAGE = "https://shop.example.com/cart";
@@ -342,6 +343,92 @@ describe("SendFlow preview then send", () => {
     await unpaired.send.preview([pin("sf-aaaaaaaaaaaa", "One")]);
     expect(unpaired.send.state.connection.state).toBe("unpaired");
     expect(unpaired.send.target).toBeNull();
+  });
+});
+
+describe("SendFlow follow-up from a pin's thread", () => {
+  const tracking: PinTracking = {
+    messageId: "sf-0123456789ab",
+    sessionName: "api",
+    sessionPid: 2,
+    status: "fixed",
+    statusLabel: "Fixed",
+    pullRequestUrl: null,
+    thread: [],
+    earlier: [],
+    events: [],
+    blocked: null,
+    resolved: false,
+    inFlight: false,
+    revision: 3,
+    updatedAt: 1,
+  };
+  const delivered = {
+    id: "sf-0123456789cd",
+    number: 2,
+    sessionPid: 2,
+    sessionName: "api",
+    status: "sent",
+    statusLabel: "Sent",
+    createdAt: "x",
+    updatedAt: "x",
+    thread: [],
+    pullRequestUrl: null,
+    following: true,
+    revision: 0,
+  };
+
+  it("previews a reply to the pin's own session, and sends it only on confirm", async () => {
+    const worker = fakeWorker({
+      status: paired,
+      sessions: sessionsOf([web, api], "acme/web"),
+      preview: () => ({
+        ok: true,
+        value: { pinId: "sf-0123456789cd", digest: DIGEST, message: "m" },
+      }),
+      send: () => ({ ok: true, value: delivered }),
+    });
+    const { send, reports } = flow(worker);
+    await send.start();
+    // The page's chosen session is web; the pin went to api, so the reply goes there.
+    expect(send.target?.name).toBe("web");
+    await send.previewReply(pin("sf-aaaaaaaaaaaa", "Make it violet"), tracking, "  Darker please ");
+
+    const comment = followUpComment("sf-0123456789ab", "Make it violet", "Darker please");
+    const outgoing = {
+      session: 2,
+      pageUrl: PAGE,
+      pins: [{ comment, context: { selector: "#buy" } }],
+    };
+    expect(worker.requests.at(-1)).toEqual({ type: "preview", outgoing });
+    expect(send.state.preview).toMatchObject({ sessionName: "api", followUp: "Darker please" });
+
+    await send.confirm();
+    expect(worker.requests.at(-1)).toEqual({
+      type: "send",
+      outgoing,
+      pinId: "sf-0123456789cd",
+      digest: DIGEST,
+      localPinIds: ["sf-aaaaaaaaaaaa"],
+      followUp: "Darker please",
+    });
+    expect(reports.at(-1)).toEqual(["Sent your reply to claude@api.", "ok"]);
+  });
+
+  it("says so when the pin's session is no longer running", async () => {
+    const worker = fakeWorker({ status: paired, sessions: sessionsOf([web], null) });
+    const { send, reports } = flow(worker);
+    await send.start();
+    await send.previewReply(pin("sf-aaaaaaaaaaaa", "x"), tracking, "Again");
+    expect(worker.requests.some((request) => request.type === "preview")).toBe(false);
+    expect(reports.at(-1)?.[0]).toMatch(/claude@api is not running any more/);
+  });
+
+  it("names the earlier message and quotes a long comment only in part", () => {
+    const comment = followUpComment("sf-0123456789ab", "y".repeat(500), "Shorter");
+    expect(comment).toMatch(/^Follow-up to Squashflow pin \[sf-0123456789ab\] on the same element/);
+    expect(comment).toContain(`"${"y".repeat(300)}…"`);
+    expect(comment.endsWith("\n\nShorter")).toBe(true);
   });
 });
 

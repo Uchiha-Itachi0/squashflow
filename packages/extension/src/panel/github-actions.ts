@@ -9,12 +9,19 @@
 import type { PinTracking } from "../status/pin-status";
 import type { StoredPin } from "../store/pins";
 import { buildOwnerMessage, changeSummary, extractPatch } from "../github/blocked";
-import type { GitHubBlockView, GitHubChoice } from "../ui/github-view";
 import type { SendFlow } from "./send-flow";
+
+export type GitHubChoice = "login" | "retry" | "fork" | "patch" | "owner";
+
+export interface GitHubBlockView {
+  /** The session's one-line reason: untrusted, rendered as plain text. */
+  reason: string | null;
+  /** Whether the Log in instruction is showing. */
+  loginOpen: boolean;
+}
 
 export interface GitHubActionHooks {
   send: SendFlow;
-  pageUrl: () => string;
   copy: (text: string) => Promise<void>;
   report: (text: string) => void;
   onChange: () => void;
@@ -55,7 +62,7 @@ export class GitHubActions {
       case "owner":
         await this.hooks.copy(
           buildOwnerMessage({
-            pageUrl: this.hooks.pageUrl(),
+            pageUrl: pin.pageUrl,
             comment: pin.comment,
             summary: changeSummary(tracking.thread),
             hasPatch: latestPatch(tracking) !== null,

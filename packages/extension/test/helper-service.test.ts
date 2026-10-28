@@ -143,6 +143,11 @@ describe("HelperService sessions and sending", () => {
     expect(
       await service.handle({ type: "sessions", pageUrl: "https://shop.example.com/" }),
     ).toEqual({ ok: true, value: { sessions: [session], repo: "acme/web" } });
+    // With no page open in the side panel, sessions come without a repository.
+    expect(await service.handle({ type: "sessions", pageUrl: null })).toEqual({
+      ok: true,
+      value: { sessions: [session], repo: null },
+    });
   });
 
   it("previews and sends through the helper with the stored token", async () => {
@@ -194,6 +199,15 @@ describe("HelperService sessions and sending", () => {
         pinId: "sf-0123456789ab",
         digest: "b".repeat(64),
         localPinIds: ["sf-aaaaaaaaaaaa", "sf-bbbbbbbbbbbb"],
+      },
+      // A follow-up is about one pin.
+      {
+        type: "send",
+        outgoing: { session: 1, pageUrl: PAGE, pins: [{ comment: "x" }, { comment: "y" }] },
+        pinId: "sf-0123456789ab",
+        digest: "b".repeat(64),
+        localPinIds: ["sf-aaaaaaaaaaaa", "sf-bbbbbbbbbbbb"],
+        followUp: "Again",
       },
       { type: "mark", pinId: "sf-aaaaaaaaaaaa", mark: "delete" },
       { type: "remember-site", pageUrl: PAGE, repo: "../../etc" },

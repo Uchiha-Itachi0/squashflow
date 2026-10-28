@@ -1,11 +1,15 @@
 /**
  * The built extension in Chromium, plus a local fixture page.
  *
- * Playwright cannot click the toolbar button, which is what grants activeTab. The
- * harness stands in for that click: it loads a copy of the build with a host permission
- * for every site (`captureVisibleTab`, behind region screenshots, accepts only activeTab or
- * `<all_urls>`), and injects the same built pin-mode script the service worker injects. The fixture is served as `localhost`, so calls to the helper on 127.0.0.1
- * are cross-origin and go through CORS, as they do for the real extension.
+ * Playwright cannot click the toolbar button, which is what grants activeTab and opens
+ * the side panel. The harness stands in for that click: it loads a copy of the build
+ * with a host permission for every site (`captureVisibleTab`, behind region screenshots,
+ * accepts only activeTab or `<all_urls>`), injects the same built pin-mode script the
+ * service worker injects, and opens the side panel's page in a tab of the same window,
+ * where it follows the active tab as it does in the side panel. Open the panel first:
+ * the page opened after it is then the active tab. The fixture is served as
+ * `localhost`, so calls to the helper on 127.0.0.1 are cross-origin and go through
+ * CORS, as they do for the real extension.
  */
 
 import { expect, type BrowserContext, type Page, type Worker } from "@playwright/test";
@@ -28,7 +32,9 @@ export interface ExtensionHarness {
   /** The fixture page's origin, `http://localhost:<port>`. */
   origin: string;
   worker(): Promise<Worker>;
-  togglePinMode(page: Page): Promise<void>;
+  /** The side panel's page, in a tab; open it before the page to pin on. */
+  openPanel(): Promise<Page>;
+  startPinMode(page: Page): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -66,7 +72,15 @@ export async function launchExtension(): Promise<ExtensionHarness> {
     context,
     origin,
     worker,
-    togglePinMode: async (page) => {
+    openPanel: async () => {
+      const sw = await worker();
+      const id = new URL(sw.url()).host;
+      const panel = await context.newPage();
+      await panel.setViewportSize({ width: 400, height: 860 });
+      await panel.goto(`chrome-extension://${id}/sidepanel.html`);
+      return panel;
+    },
+    startPinMode: async (page) => {
       const sw = await worker();
       // The service worker loaded and registered its toolbar handler.
       expect(await sw.evaluate(() => chrome.action.onClicked.hasListeners())).toBe(true);
@@ -93,5 +107,12 @@ export async function pinElement(page: Page, selector: string, comment: string):
   const box = page.getByRole("textbox", { name: "Comment" });
   await expect(box).toBeFocused();
   await box.fill(comment);
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save pin" }).click();
+}
+
+/** Pair the side panel with the helper from the Connect screen. */
+export async function pair(panel: Page, code: string, port: number): Promise<void> {
+  await panel.getByRole("textbox", { name: "Type the code it shows" }).fill(code);
+  await panel.getByRole("spinbutton", { name: "Helper port" }).fill(String(port));
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
 }

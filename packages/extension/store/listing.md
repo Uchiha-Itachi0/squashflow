@@ -18,9 +18,9 @@ The text for the Squashflow listing in the Chrome Web Store Developer Dashboard,
 
 > Squashflow turns "this button should be blue" into a pull request without leaving the page.
 >
-> Turn on pin mode with the toolbar button or Alt+Shift+P, then click an element, drag an area, Shift+click several elements, or select text, and write what should change. Squashflow captures what Claude needs to find the code: a selector, the element's text, key attributes, computed styles, the surrounding structure and a screenshot of the region.
+> Click the toolbar button or press Alt+Shift+P: Squashflow opens in Chrome's side panel, and a small toolbar on the page lets you click an element, select text, drag an area or pick several elements, and write what should change. Squashflow captures what Claude needs to find the code: a selector, the element's text, key attributes, computed styles, the surrounding structure and a screenshot of the region.
 >
-> Send the pin to the Claude Code session you already have open in your terminal. A small local helper (`npx squashflow`) delivers it there; you see the exact message before anything is sent. Your session fixes the code, pushes a branch and opens a pull request with your own GitHub login, and its reply and the pull request link appear on the pin.
+> Send the pin to the Claude Code session you already have open in your terminal. A small local helper (`npx squashflow`) delivers it there; you see the exact message before anything is sent. Your session fixes the code, pushes a branch and opens a pull request with your own GitHub login. Each pin reads like a chat in the side panel: sent, seen by Claude, Claude's reply, then fixed with the pull request link. Not quite right? Reply to Claude from the pin.
 >
 > No session open, or reviewing a site you do not own? Copy pins as text at the detail level you need (compact, standard, detailed or forensic, which includes the screenshot) and paste them into any session or tool.
 >
@@ -32,7 +32,7 @@ The text for the Squashflow listing in the Chrome Web Store Developer Dashboard,
 
 1. `1-pin-an-area.png`: Pin an area and say what should change.
 2. `2-preview-then-send.png`: See exactly what your Claude Code session will receive.
-3. `3-fixed-with-pull-request.png`: Claude's reply and the pull request land on the pin.
+3. `3-fixed-with-pull-request.png`: The pin's conversation: seen by Claude, Claude's reply, fixed with a pull request.
 
 **Icon:** `assets/icon128.png` (Squish in the middle 96×96 of a 128×128 canvas).
 
@@ -52,10 +52,11 @@ The text for the Squashflow listing in the Chrome Web Store Developer Dashboard,
 | --- | --- |
 | `activeTab` | Pin mode runs only on the tab where the user clicks the toolbar button or presses the shortcut, and only after they do. The same grant lets the extension take a screenshot of that tab's visible area, which it crops to the pinned region. There are no host permissions. |
 | `scripting` | Injects the pin mode script into that tab when the user turns pin mode on. Nothing is injected into any page the user has not acted on. |
-| `storage` | Keeps the user's pins (comments, captured page context and region screenshots), each sent pin's status and Claude's replies, and the sites whose repository the user asked it to remember, in the extension's local storage. |
+| `sidePanel` | Shows Squashflow's own page (the user's pins and their conversations with Claude, the session picker and the settings) in Chrome's side panel next to the page, instead of drawing it over the page. It opens when the user clicks the toolbar button. It gives no access to any website. |
+| `storage` | Keeps the user's pins (comments, captured page context and region screenshots), each sent pin's status, history and Claude's replies, the user's settings, and the sites whose repository the user asked it to remember, in the extension's local storage. |
 | `unlimitedStorage` | Region screenshots are kept with their pins, up to 200 KB each and 50 pins per page. Without it, local storage stops at 10 MB and saving a pin would start to fail after a few dozen screenshots. Nothing is stored anywhere but the user's own browser. |
 
-**Remote code:** No. Every script the extension runs ships inside the package.
+**Remote code:** No. Every script the extension runs, and every font it uses, ships inside the package.
 
 **Data usage:** Squashflow handles *website content* (the pinned element's selector, text, attributes, styles and structure, and a screenshot of the region) and the *comments* the user writes. It does not collect them: they stay in the browser's local storage, and leave it only when the user sends a pin, to the Squashflow helper on `127.0.0.1` on the same computer, which hands it to the user's own Claude Code session. The developer never receives any of it. Nothing is sold, transferred to third parties, used for advertising or creditworthiness, or used for anything other than the single purpose.
 

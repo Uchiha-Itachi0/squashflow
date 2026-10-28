@@ -1,12 +1,13 @@
 /**
- * Messages between the pin mode script and the service worker. The pin mode script
- * never calls the helper or sees the pairing token: it asks the service worker, which
- * validates every request before acting on it.
+ * Messages from the side panel to the service worker. Neither the side panel nor the pin
+ * mode script calls the helper or sees the pairing token: they ask the service worker,
+ * which validates every request before acting on it.
  */
 
 import {
   digestSchema,
   FOLLOW_UP_ACTIONS,
+  MAX_COMMENT_CHARS,
   MAX_PINS_PER_MESSAGE,
   pageUrlSchema,
   pinIdSchema,
@@ -36,7 +37,8 @@ export const workerRequestSchema = z.discriminatedUnion("type", [
     port: portSchema,
   }),
   z.strictObject({ type: z.literal("forget") }),
-  z.strictObject({ type: z.literal("sessions"), pageUrl: pageUrlSchema }),
+  /** The page, when one is open, picks the repository remembered for its site. */
+  z.strictObject({ type: z.literal("sessions"), pageUrl: pageUrlSchema.nullable() }),
   z.strictObject({
     type: z.literal("remember-site"),
     pageUrl: pageUrlSchema,
@@ -50,6 +52,11 @@ export const workerRequestSchema = z.discriminatedUnion("type", [
     digest: digestSchema,
     /** The extension's own ids of the pins in the message, in order. */
     localPinIds: z.array(pinIdSchema).min(1).max(MAX_PINS_PER_MESSAGE),
+    /**
+     * Set when the message is the user's follow-up on one pin already sent: what they
+     * typed, for the pin's thread.
+     */
+    followUp: z.string().trim().min(1).max(MAX_COMMENT_CHARS).optional(),
   }),
   /**
    * A follow-up to a sent pin blocked on GitHub access, by the extension's own pin id:
@@ -110,7 +117,7 @@ const WORKER_FAILED: HelperFailure = {
   message: "Squashflow's background worker did not answer. Reload the page and try again.",
 };
 
-/** Ask the service worker, from the pin mode script. */
+/** Ask the service worker, from the side panel. */
 export async function askWorker<R extends WorkerRequest>(
   request: R,
 ): Promise<WorkerReply<R["type"]>> {

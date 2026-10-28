@@ -123,3 +123,16 @@ export class PinStore {
     else await this.area.set({ [this.key]: pins });
   }
 }
+
+/** Hear about changes to one page's pins in `chrome.storage.local`, from any part of the extension. */
+export function watchPins(href: string, onChange: () => void): () => void {
+  const key = pageKey(href);
+  const listener = (
+    changes: Record<string, chrome.storage.StorageChange>,
+    area: chrome.storage.AreaName,
+  ): void => {
+    if (area === "local" && changes[key] !== undefined) onChange();
+  };
+  chrome.storage.onChanged.addListener(listener);
+  return () => chrome.storage.onChanged.removeListener(listener);
+}

@@ -2,7 +2,7 @@
  * The service worker's side of talking to the helper: pairing, the connection status,
  * sessions for a page, the remembered site-to-repository mapping, preview and send, and
  * the status of sent pins.
- * Requests from the pin mode script are validated here before anything is done.
+ * Requests from the side panel are validated here before anything is done.
  */
 
 import { HelperClient, type FetchLike } from "./client";
@@ -81,8 +81,11 @@ export class HelperService {
 
   private async send(request: Extract<WorkerRequest, { type: "send" }>): Promise<AnyReply> {
     if (request.localPinIds.length !== request.outgoing.pins.length) return BAD_REQUEST;
+    if (request.followUp !== undefined && request.localPinIds.length !== 1) return BAD_REQUEST;
     const sent = await (await this.client()).send(request.outgoing, request.pinId, request.digest);
-    if (sent.ok) await this.options.tracker.sent(request.localPinIds, sent.value);
+    if (sent.ok) {
+      await this.options.tracker.sent(request.localPinIds, sent.value, request.followUp ?? null);
+    }
     return sent;
   }
 
@@ -125,13 +128,11 @@ export class HelperService {
     return { ok: true, value: await this.status() };
   }
 
-  private async sessions(pageUrl: string): Promise<AnyReply> {
+  private async sessions(pageUrl: string | null): Promise<AnyReply> {
     const sessions = await (await this.client()).sessions();
     if (!sessions.ok) return sessions;
-    return {
-      ok: true,
-      value: { sessions: sessions.value, repo: await this.options.sites.get(pageUrl) },
-    };
+    const repo = pageUrl === null ? null : await this.options.sites.get(pageUrl);
+    return { ok: true, value: { sessions: sessions.value, repo } };
   }
 
   private async client(): Promise<HelperClient> {
