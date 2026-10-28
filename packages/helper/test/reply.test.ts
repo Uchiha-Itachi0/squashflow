@@ -61,12 +61,18 @@ describe("ReplyTracker", () => {
       text: "Done: the Buy button is violet now.\n\nPR: https://github.com/acme/demo/pull/17",
       truncated: false,
       pullRequestUrl: "https://github.com/acme/demo/pull/17",
+      blocked: null,
     });
   });
 
   it("reports a reply without a pull request link", () => {
     const reply = replyOf(run([peer(pin), assistant("m", [text("Which button?")]), turnEnd]));
-    expect(reply).toEqual({ text: "Which button?", truncated: false, pullRequestUrl: null });
+    expect(reply).toEqual({
+      text: "Which button?",
+      truncated: false,
+      pullRequestUrl: null,
+      blocked: null,
+    });
   });
 
   it("attributes a batch reply to the batch's single pin id", () => {
@@ -101,7 +107,25 @@ describe("ReplyTracker", () => {
       turnEnd,
       assistant("after", [text("Later answer https://github.com/acme/demo/pull/2")]),
     ]);
-    expect(replyOf(events)).toEqual({ text: "Mine.", truncated: false, pullRequestUrl: null });
+    expect(replyOf(events)).toEqual({
+      text: "Mine.",
+      truncated: false,
+      pullRequestUrl: null,
+      blocked: null,
+    });
+  });
+
+  it("reports the pin's blocked line, and only this pin's", () => {
+    const blockedText = [
+      "Committed on squashflow/violet-buy, but the push failed.",
+      `SQUASHFLOW-BLOCKED [${pin}] github-access: no push permission to acme/demo`,
+    ].join("\n");
+    const reply = replyOf(run([peer(pin), assistant("m", [text(blockedText)]), turnEnd]));
+    expect(reply?.blocked).toEqual({ reason: "no push permission to acme/demo" });
+    const another = replyOf(
+      run([peer(pin), assistant("m", [text(blockedText.replace(pin, other))]), turnEnd]),
+    );
+    expect(another?.blocked).toBeNull();
   });
 
   it("ends the turn at the next prompt when there is no turn notice", () => {

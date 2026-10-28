@@ -23,6 +23,7 @@ function record(patch: Partial<PinRecord> = {}): PinRecord {
     updatedAt: "2026-10-28T00:00:00.000Z",
     thread: [],
     pullRequestUrl: null,
+    blocked: null,
     following: true,
     revision: 0,
     ...patch,

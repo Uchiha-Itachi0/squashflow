@@ -31,6 +31,11 @@ const BAD_REQUEST: AnyReply = {
   failure: { kind: "rejected", message: "Squashflow sent itself a request it does not accept." },
 };
 
+const NOT_SENT: AnyReply = {
+  ok: false,
+  failure: { kind: "rejected", message: "That pin was not sent to a session." },
+};
+
 export class HelperService {
   constructor(private readonly options: HelperServiceOptions) {}
 
@@ -63,6 +68,10 @@ export class HelperService {
         return (await this.client()).preview(request.outgoing);
       case "send":
         return this.send(request);
+      case "follow-up-preview":
+        return this.followUpPreview(request);
+      case "follow-up-send":
+        return this.followUpSend(request);
       case "track":
         return { ok: true, value: await this.options.tracker.sync() };
       case "mark":
@@ -74,6 +83,24 @@ export class HelperService {
     if (request.localPinIds.length !== request.outgoing.pins.length) return BAD_REQUEST;
     const sent = await (await this.client()).send(request.outgoing, request.pinId, request.digest);
     if (sent.ok) await this.options.tracker.sent(request.localPinIds, sent.value);
+    return sent;
+  }
+
+  private async followUpPreview(
+    request: Extract<WorkerRequest, { type: "follow-up-preview" }>,
+  ): Promise<AnyReply> {
+    const messageId = await this.options.tracker.messageIdOf(request.pinId);
+    if (messageId === null) return NOT_SENT;
+    return (await this.client()).followUpPreview(messageId, request.action);
+  }
+
+  private async followUpSend(
+    request: Extract<WorkerRequest, { type: "follow-up-send" }>,
+  ): Promise<AnyReply> {
+    const messageId = await this.options.tracker.messageIdOf(request.pinId);
+    if (messageId === null) return NOT_SENT;
+    const sent = await (await this.client()).followUp(messageId, request.action, request.digest);
+    if (sent.ok) await this.options.tracker.followedUp(sent.value);
     return sent;
   }
 

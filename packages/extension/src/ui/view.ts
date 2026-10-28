@@ -16,6 +16,7 @@ import {
   type SendSectionProps,
 } from "./send-view";
 import type { ShownStatus } from "../status/pin-status";
+import { gitHubOptions, type GitHubBlockView, type GitHubChoice } from "./github-view";
 import { squishSvg, type SquishMood } from "./squish";
 import { PIN_UI_CSS } from "./styles";
 
@@ -29,6 +30,8 @@ export interface PinStatusView {
   /** Claude's latest reply: untrusted, always rendered as plain text. */
   reply: { text: string; truncated: boolean } | null;
   pullRequestUrl: string | null;
+  /** Set while the pin is Blocked: GitHub access, to offer the ways out. */
+  github: GitHubBlockView | null;
 }
 
 export interface PanelPin {
@@ -64,6 +67,7 @@ export interface PanelProps {
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onResolve: (id: string, resolved: boolean) => void;
+  onGitHub: (id: string, choice: GitHubChoice) => void;
   onClose: () => void;
 }
 
@@ -340,7 +344,10 @@ function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
   ]);
 }
 
-/** The status chip, Claude's reply as plain text, the pull request link, Resolve or Reopen. */
+/**
+ * The status chip, Claude's reply as plain text, the pull request link, Resolve or Reopen,
+ * and the ways out of Blocked: GitHub access.
+ */
 function pinStatus(pin: PanelPin, status: PinStatusView, props: PanelProps): HTMLElement {
   const mood = h("span", { className: "mini-squish" });
   // Constant markup chosen by mood; no reply or page text goes into it.
@@ -374,6 +381,11 @@ function pinStatus(pin: PanelPin, status: PinStatusView, props: PanelProps): HTM
         text: status.reply.truncated ? `${status.reply.text} … (cut)` : status.reply.text,
         attrs: { "aria-label": `Claude's reply to pin ${pin.number}` },
       }),
+    status.github !== null &&
+      !resolved &&
+      gitHubOptions(pin.number, status.github, props.send.state.busy, (choice) =>
+        props.onGitHub(pin.id, choice),
+      ),
   ]);
 }
 

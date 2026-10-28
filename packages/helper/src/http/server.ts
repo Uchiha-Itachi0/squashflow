@@ -5,7 +5,13 @@ import type { PublicSession } from "@squashflow/shared";
 import { HELPER_VERSION, LOOPBACK_HOST } from "../constants.js";
 import { DraftError, type DeliveryService, type DraftErrorReason } from "../delivery.js";
 import { generateToken, hashToken, type PairingCodes } from "../pairing.js";
-import { pairRequestSchema, pinsRequestSchema, type PinsRequest } from "../schemas.js";
+import {
+  followUpRequestSchema,
+  pairRequestSchema,
+  pinsRequestSchema,
+  type FollowUpRequest,
+  type PinsRequest,
+} from "../schemas.js";
 import {
   findSession,
   SessionLookupError,
@@ -26,6 +32,7 @@ import {
 
 const SSE_KEEPALIVE_MS = 15_000;
 const PIN_PATH = /^\/pins\/(sf-[0-9a-f]{12})$/;
+const FOLLOW_UP_PATH = /^\/pins\/(sf-[0-9a-f]{12})\/follow-up$/;
 
 export interface HelperLog {
   info(text: string): void;
@@ -143,6 +150,8 @@ async function route(
     await pins(context, request, response);
   } else if (path === "/events" && method === "GET") {
     events(context, response);
+  } else if (FOLLOW_UP_PATH.test(path) && method === "POST") {
+    await followUp(context, request, response, FOLLOW_UP_PATH.exec(path)?.[1] ?? "");
   } else {
     const pinId = PIN_PATH.exec(path)?.[1];
     const pin = pinId !== undefined && method === "GET" ? context.delivery.get(pinId) : undefined;
@@ -266,6 +275,64 @@ async function deliverPreviewed(
   }
 }
 
+/**
+ * A follow-up to a pin blocked on GitHub access: preview it, then deliver it with the
+ * preview's digest, to the same session the pin went to (same pid and session id).
+ */
+async function followUp(
+  context: HelperContext,
+  request: IncomingMessage,
+  response: ServerResponse,
+  pinId: string,
+): Promise<void> {
+  const body = await readJsonBody(request, context.maxBodyBytes, followUpRequestSchema);
+  if (!body.ok) {
+    fail(response, body);
+    return;
+  }
+  try {
+    const session = await followUpSession(context, pinId);
+    if (body.value.preview === true) {
+      const draft = context.delivery.createFollowUp(pinId, body.value.action);
+      send(response, 200, { pinId, digest: draft.digest, message: draft.message });
+      return;
+    }
+    await deliverFollowUp(context, response, pinId, body.value, session);
+  } catch (error) {
+    sendFailure(context, response, error, "follow-up");
+  }
+}
+
+async function deliverFollowUp(
+  context: HelperContext,
+  response: ServerResponse,
+  pinId: string,
+  input: FollowUpRequest,
+  session: SessionInfo,
+): Promise<void> {
+  if (input.digest === undefined) {
+    send(response, 400, { error: "Preview the follow-up first, then send its digest" });
+    return;
+  }
+  const draft = context.delivery.verifyFollowUp(pinId, input.action, input.digest);
+  const pin = await context.delivery.deliverFollowUp(draft, session);
+  context.log.arrow(`claude@${session.name}  pin ${pin.number} follow-up (${input.action})`);
+  send(response, 202, { pin });
+}
+
+/** The running session the pin was delivered to, or a not-found failure. */
+async function followUpSession(context: HelperContext, pinId: string): Promise<SessionInfo> {
+  const original = context.delivery.sessionOf(pinId);
+  if (original === undefined) throw new DraftError("unknown-pin", "No pin with that id.");
+  const running = (await context.discover()).find(
+    (session) => session.pid === original.pid && session.sessionId === original.sessionId,
+  );
+  if (running === undefined) {
+    throw new SessionLookupError("not-found", "The pin's session is no longer running.");
+  }
+  return running;
+}
+
 function events(context: HelperContext, response: ServerResponse): void {
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -343,6 +410,11 @@ const DRAFT_FAILURES: Record<DraftErrorReason, CheckFailure> = {
   "no-session-id": {
     status: 409,
     error: "That session has no session id, so delivery cannot be confirmed",
+  },
+  "unknown-pin": { status: 404, error: "Unknown pin" },
+  "not-blocked": {
+    status: 409,
+    error: "Follow-ups are only for pins blocked on GitHub access and not in flight",
   },
 };
 

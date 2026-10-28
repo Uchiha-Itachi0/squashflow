@@ -1,13 +1,14 @@
 /**
  * The message for a session. Fixed four-part structure:
  * provenance header, the user's comment(s), page context fenced as untrusted data,
- * and the requested outcome. Building is deterministic so a preview can be verified.
+ * and the requested outcome (the GitHub flow, see github.ts). Building is deterministic so a preview can be verified.
  *
  * The helper builds it for delivery; the extension builds it for copy-and-paste mode,
  * so both paths share the same structure, fencing and escaping.
  */
 
 import { contextForLevel, includesPageUrl, type DetailLevel } from "./detail.js";
+import { requestedOutcome } from "./github.js";
 import type { PinInput } from "./schemas.js";
 
 export const CONTEXT_OPEN = "<untrusted-page-context>";
@@ -51,10 +52,7 @@ export function buildMessage({ pinId, source, pageUrl, pins, detail }: MessageIn
     plural ? `The user's comments (${pins.length} pins):` : "The user's comment:",
     comments,
     contextSection(leveled),
-    [
-      "Requested outcome:",
-      `Fix ${plural ? "these" : "this"} on a new branch, open a pull request, and reply with a short summary and the pull request link.`,
-    ].join("\n"),
+    requestedOutcome(pinId, plural),
   ].join("\n\n");
 }
 

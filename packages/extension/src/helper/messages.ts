@@ -6,6 +6,7 @@
 
 import {
   digestSchema,
+  FOLLOW_UP_ACTIONS,
   MAX_PINS_PER_MESSAGE,
   pageUrlSchema,
   pinIdSchema,
@@ -50,6 +51,21 @@ export const workerRequestSchema = z.discriminatedUnion("type", [
     /** The extension's own ids of the pins in the message, in order. */
     localPinIds: z.array(pinIdSchema).min(1).max(MAX_PINS_PER_MESSAGE),
   }),
+  /**
+   * A follow-up to a sent pin blocked on GitHub access, by the extension's own pin id:
+   * preview it, then send it with the preview's digest. The worker finds the message.
+   */
+  z.strictObject({
+    type: z.literal("follow-up-preview"),
+    pinId: pinIdSchema,
+    action: z.enum(FOLLOW_UP_ACTIONS),
+  }),
+  z.strictObject({
+    type: z.literal("follow-up-send"),
+    pinId: pinIdSchema,
+    action: z.enum(FOLLOW_UP_ACTIONS),
+    digest: digestSchema,
+  }),
   /** Re-read the pins in flight from the helper and keep following them. */
   z.strictObject({ type: z.literal("track") }),
   z.strictObject({
@@ -81,6 +97,8 @@ export interface WorkerReplies {
   "remember-site": null;
   preview: PreviewResponse;
   send: PinRecord;
+  "follow-up-preview": PreviewResponse;
+  "follow-up-send": PinRecord;
   track: PinStatuses;
   mark: PinStatuses;
 }
