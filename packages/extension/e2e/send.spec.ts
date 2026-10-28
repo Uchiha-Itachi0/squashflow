@@ -1,7 +1,9 @@
 /**
  * Pair the built extension with the real helper, pick a session, preview the message
- * and send it. The helper runs against a fake `claude` and fake inbox sockets, and the
- * test checks that the inbox received exactly the message that was previewed.
+ * and send it, then follow it to Claude's reply. The helper runs against a fake `claude`,
+ * fake inbox sockets and a fake transcript; the test checks that the inbox received
+ * exactly the message that was previewed, and that the reply written to the transcript
+ * reaches the pin as plain text with its pull request link.
  */
 
 import { expect, test } from "@playwright/test";
@@ -87,11 +89,59 @@ test("pair, pick a session, preview and send a pin", async () => {
   expect(line.type).toBe("user");
   expect(line.message.content).toContain(`\n${previewed}\n</cross-session-message>`);
   expect(helper.inboxLines(OTHER.pid)).toHaveLength(0);
+  const row = panel.locator("li", { hasText: "Make the Buy button violet" });
+  const marker = page.locator("squashflow-root .marker").first();
+  await expect(row.getByText("Sent", { exact: true })).toBeVisible();
+  await expect(marker).toHaveAttribute("data-status", "sent");
+
+  // Claude Code records the message, then replies with a pull request link.
+  const replyText =
+    "Made the Buy button violet. <img src=x onerror=alert(1)> https://github.com/acme/demo/pull/5";
+  await helper.appendTranscript(DEMO.pid, [
+    {
+      type: "user",
+      isMeta: true,
+      origin: { kind: "peer", name: "squashflow", body: line.message.content },
+      message: { role: "user", content: line.message.content },
+    },
+  ]);
+  await expect(row.getByText("Seen by Claude", { exact: true })).toBeVisible();
+  await expect(marker).toHaveAttribute("data-status", "seen");
+  await helper.appendTranscript(DEMO.pid, [
+    {
+      type: "assistant",
+      message: { id: "msg_e2e", role: "assistant", content: [{ type: "text", text: replyText }] },
+    },
+    { type: "system", subtype: "turn_duration", durationMs: 1000 },
+  ]);
+  await expect(row.getByText("Fixed", { exact: true })).toBeVisible();
+  await expect(marker).toHaveAttribute("data-status", "fixed");
+  await expect(row.getByLabel("Claude's reply to pin 1")).toHaveText(replyText);
+  await expect(row.getByRole("link", { name: "Pull request for pin 1" })).toHaveAttribute(
+    "href",
+    "https://github.com/acme/demo/pull/5",
+  );
+  // The reply is text, never markup.
+  expect(
+    await page
+      .locator("squashflow-root")
+      .evaluate((host) => host.shadowRoot?.querySelectorAll("img").length),
+  ).toBe(0);
+
+  await row.getByRole("button", { name: "Resolve pin 1" }).click();
+  await expect(row.getByText("Resolved", { exact: true })).toBeVisible();
+  await expect(marker).toHaveAttribute("data-status", "resolved");
+  await row.getByRole("button", { name: "Reopen pin 1" }).click();
+  await expect(row.getByText("Fixed", { exact: true })).toBeVisible();
 
   // The token never lands in storage the pin mode script can read.
   const worker = await harness.worker();
   const stored = await worker.evaluate(() => chrome.storage.local.get(null));
-  expect(Object.keys(stored).sort()).toEqual([`pins:${harness.origin}/`, "site-repos"]);
+  expect(Object.keys(stored).sort()).toEqual([
+    "pin-status",
+    `pins:${harness.origin}/`,
+    "site-repos",
+  ]);
   expect(stored["site-repos"]).toEqual({ [harness.origin]: "acme/demo" });
 
   // The remembered site preselects its only matching session next time.

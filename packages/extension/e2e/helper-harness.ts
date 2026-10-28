@@ -1,12 +1,12 @@
 /**
- * The real helper (the built `squashflow` CLI) against a fake `claude` on PATH and a
- * fake session inbox socket in a temporary folder. Nothing touches a real Claude Code
- * session: the helper's state, Claude config and inbox socket folder all point into
- * the temporary folder.
+ * The real helper (the built `squashflow` CLI) against a fake `claude` on PATH, a
+ * fake session inbox socket and fake session transcripts in a temporary folder. Nothing
+ * touches a real Claude Code session: the helper's state, Claude config and inbox socket
+ * folder all point into the temporary folder.
  */
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer, type AddressInfo, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -30,6 +30,8 @@ export interface RunningHelper {
   inboxLines(pid: number): string[];
   /** Resolves with the first line written to that inbox. */
   received(pid: number): Promise<string>;
+  /** Append records to that session's fake transcript, as Claude Code would. */
+  appendTranscript(pid: number, records: readonly unknown[]): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -41,7 +43,8 @@ export async function startHelper(sessions: readonly FakeSessionSpec[]): Promise
   await mkdir(bin);
   await mkdir(socks);
 
-  const agents = [];
+  const agents: { pid: number; cwd: string; name: string; status: string; sessionId: string }[] =
+    [];
   for (const session of sessions) {
     const cwd = join(root, "work", session.name);
     await mkdir(cwd, { recursive: true });
@@ -99,6 +102,15 @@ export async function startHelper(sessions: readonly FakeSessionSpec[]): Promise
     pairingCode,
     inboxLines: (pid) => inbox(pid).lines,
     received: (pid) => inbox(pid).received,
+    appendTranscript: async (pid, records) => {
+      const agent = agents.find((entry) => entry.pid === pid);
+      if (agent === undefined) throw new Error(`No fake session with pid ${pid}`);
+      // Claude Code's project folder: the cwd with every non-alphanumeric character as `-`.
+      const folder = join(root, "claude", "projects", agent.cwd.replace(/[^A-Za-z0-9]/g, "-"));
+      await mkdir(folder, { recursive: true });
+      const lines = records.map((record) => `${JSON.stringify(record)}\n`).join("");
+      await appendFile(join(folder, `${agent.sessionId}.jsonl`), lines);
+    },
     close: async () => {
       if (child.exitCode === null) {
         const exited = new Promise((resolve) => child.once("exit", resolve));

@@ -2,7 +2,7 @@
 
 Squashflow connects a browser extension to a local process that can deliver messages into a coding agent with access to your source code and your GitHub login. That makes security a design requirement, not an add-on. This document describes how to report a vulnerability and the threat model the project is built against.
 
-Squashflow is in early development and nothing is released yet. The local helper is implemented, so its mitigations below (loopback binding, pairing, request checks, message fencing, socket checks) describe what it does today; [docs/architecture.md](docs/architecture.md) has the exact values. The extension's pins, page context capture and copy are implemented too: it asks only for `activeTab`, `scripting` and `storage`, injects nothing until you click it, never captures form field values, and fences page context in copied text exactly as the helper does in delivered messages (see the [README](README.md#try-the-extension) and [docs/architecture.md](docs/architecture.md#the-extension)). The extension's side of pairing and sending is implemented as well: only its background service worker calls the helper, the pairing token is kept in that service worker's own IndexedDB (out of reach of web pages and of the script running in the page), and every message is previewed before it is sent. Per-pin status and replies in the browser are still the **planned design**, and this document is updated as that code lands.
+Squashflow is in early development and nothing is released yet. The local helper is implemented, so its mitigations below (loopback binding, pairing, request checks, message fencing, socket checks) describe what it does today; [docs/architecture.md](docs/architecture.md) has the exact values. The extension's pins, page context capture and copy are implemented too: it asks only for `activeTab`, `scripting` and `storage`, injects nothing until you click it, never captures form field values, and fences page context in copied text exactly as the helper does in delivered messages (see the [README](README.md#try-the-extension) and [docs/architecture.md](docs/architecture.md#the-extension)). The extension's side of pairing and sending is implemented as well: only its background service worker calls the helper, the pairing token is kept in that service worker's own IndexedDB (out of reach of web pages and of the script running in the page), and every message is previewed before it is sent. So are per-pin status and Claude's replies in the browser: replies are treated as untrusted text (see [below](#threat-hostile-content-in-claudes-replies)).
 
 ## Supported versions
 
@@ -74,6 +74,16 @@ Planned mitigations:
 - **Claude Code's own permissions still apply.** Squashflow does not bypass Claude Code's permission prompts. If a session runs in bypass-permissions mode, Claude Code holds the incoming message until you approve it in the terminal.
 
 Fencing reduces the risk but cannot remove it: a language model may still be influenced by text it reads. Reviewing the message, and reviewing the resulting pull request before merging, remain your safeguards.
+
+### Threat: hostile content in Claude's replies
+
+Claude's reply to a pin is read from the session transcript and shown in the browser. Claude may quote page content or tool output in it, so it can contain anything, including markup or links a hostile page planted.
+
+Mitigations:
+
+- **Text only.** The helper keeps only the text parts of Claude's reply, drops control characters and caps it at 8000 characters. The extension renders it as plain text, never as HTML.
+- **One kind of link.** The only link the extension renders is a GitHub pull request link (`https://github.com/<owner>/<repo>/pull/<n>`) found in the reply; it opens in a new tab without access to the opener. Anything else stays text, and stored links that do not match are dropped.
+- **Same channel as everything else.** Replies and status come from the paired helper over the same authenticated calls as every other request, and only the service worker makes them.
 
 ### Threat: local socket permissions
 

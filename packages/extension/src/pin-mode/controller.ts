@@ -2,6 +2,7 @@
  * Pin mode on the current page. While it is on, clicks on the page place pins instead
  * of reaching the page: click an element, drag an area, Shift+click several elements,
  * or switch to Text and select text. Escape closes the comment box, then exits.
+ * Sent pins show their status and Claude's reply, which the service worker stores.
  */
 
 import type { DetailLevel, Rect } from "@squashflow/shared";
@@ -9,12 +10,25 @@ import { capturePin, pageRect, type PinTarget } from "../capture/context";
 import { DRAG_THRESHOLD_PX, HOST_TAG } from "../constants";
 import { buildCopyText, writeClipboard } from "../copy/copy";
 import { askWorker, type AskWorker } from "../helper/messages";
+import {
+  moodFor,
+  moodForStatus,
+  shownLabel,
+  shownStatus,
+  type PinStatuses,
+} from "../status/pin-status";
+import { chromeStatusSource, type StatusSource } from "../status/store";
 import { pinPageUrl, type PinStore, type StoredPin } from "../store/pins";
 import type { SquishMood } from "../ui/squish";
-import { PinView, type PinModeKind } from "../ui/view";
+import { PinView, type PinModeKind, type PinStatusView } from "../ui/view";
 import { SendFlow } from "./send-flow";
 
 const MOOD_RESET_MS = 2500;
+/**
+ * While a pin on the page is in flight, ask the service worker to catch up this often.
+ * It re-reads the helper and reopens its event stream if the browser stopped the worker.
+ */
+const TRACK_INTERVAL_MS = 20_000;
 const MAX_AREA_ELEMENTS = 20;
 
 interface Drag {
@@ -31,15 +45,20 @@ export class PinMode {
   private selection: Element[] = [];
   private drag: Drag | null = null;
   private status: { text: string; error: boolean } | null = null;
-  private mood: SquishMood = "waiting";
+  /** A short-lived mood after an action; otherwise Squish follows the pins' statuses. */
+  private flash: SquishMood | null = null;
   private moodTimer: ReturnType<typeof setTimeout> | undefined;
+  private statuses: PinStatuses = {};
+  private trackTimer: ReturnType<typeof setInterval> | undefined;
+  private unwatch: () => void = () => undefined;
   private readonly listeners: [string, EventListener, Window | Document][] = [];
   private readonly send: SendFlow;
 
   constructor(
     private readonly store: PinStore,
     private readonly onStop: () => void,
-    ask: AskWorker = askWorker,
+    private readonly ask: AskWorker = askWorker,
+    private readonly statusSource: StatusSource = chromeStatusSource(),
   ) {
     this.send = new SendFlow({
       ask,
@@ -60,8 +79,15 @@ export class PinMode {
     this.listen(window, "keydown", (event) => this.onKeyDown(event as KeyboardEvent));
     this.listen(window, "keyup", (event) => this.onKeyUp(event as KeyboardEvent));
     this.listen(window, "resize", () => this.renderMarkers());
+    this.statuses = await this.statusSource.read();
+    this.unwatch = this.statusSource.watch((statuses) => {
+      this.statuses = statuses;
+      this.render();
+    });
     await this.reload();
     await this.send.start();
+    await this.track();
+    this.trackTimer = setInterval(() => void this.track(), TRACK_INTERVAL_MS);
   }
 
   stop(): void {
@@ -69,6 +95,8 @@ export class PinMode {
       target.removeEventListener(type, listener, true);
     }
     clearTimeout(this.moodTimer);
+    clearInterval(this.trackTimer);
+    this.unwatch();
     this.view.destroy();
     this.onStop();
   }
@@ -244,6 +272,9 @@ export class PinMode {
   private remove(id: string): void {
     void this.run(async () => {
       await this.store.remove(id);
+      if (this.statuses[id] !== undefined) {
+        await this.ask({ type: "mark", pinId: id, mark: "forget" });
+      }
       this.view.closeComposer();
       await this.reload();
     });
@@ -267,6 +298,54 @@ export class PinMode {
     void this.send.preview(pins);
   }
 
+  // ---- status ----
+
+  /** Catch up on pins in flight on this page; the worker's answer is the latest. */
+  private async track(): Promise<void> {
+    const inFlight = this.pins.some((pin) => this.statuses[pin.id]?.inFlight === true);
+    if (!inFlight) return;
+    const reply = await this.ask({ type: "track" });
+    if (!reply.ok) return;
+    this.statuses = reply.value;
+    this.render();
+  }
+
+  private resolve(id: string, resolved: boolean): void {
+    void this.run(async () => {
+      const reply = await this.ask({
+        type: "mark",
+        pinId: id,
+        mark: resolved ? "resolve" : "reopen",
+      });
+      if (!reply.ok) throw new Error(reply.failure.message);
+      this.statuses = reply.value;
+      this.render();
+    });
+  }
+
+  private statusOf(id: string): PinStatusView | null {
+    const tracking = this.statuses[id];
+    if (tracking === undefined) return null;
+    const status = shownStatus(tracking);
+    const latest = tracking.thread.at(-1);
+    return {
+      status,
+      label: shownLabel(tracking),
+      mood: moodForStatus(status),
+      reply: latest === undefined ? null : { text: latest.text, truncated: latest.truncated },
+      pullRequestUrl: tracking.pullRequestUrl,
+    };
+  }
+
+  private currentMood(): SquishMood {
+    if (this.flash !== null) return this.flash;
+    const shown = this.pins.flatMap((pin) => {
+      const tracking = this.statuses[pin.id];
+      return tracking === undefined ? [] : [shownStatus(tracking)];
+    });
+    return moodFor(shown) ?? "waiting";
+  }
+
   // ---- rendering ----
 
   private async reload(): Promise<void> {
@@ -280,11 +359,12 @@ export class PinMode {
         id: pin.id,
         number: index + 1,
         comment: pin.comment,
+        status: this.statusOf(pin.id),
       })),
       mode: this.mode,
       level: this.level,
       status: this.status,
-      mood: this.mood,
+      mood: this.currentMood(),
       onMode: (mode) => {
         this.mode = mode;
         this.setSelection([]);
@@ -315,6 +395,7 @@ export class PinMode {
       onSendAll: () => this.sendPins(this.pins),
       onEdit: (id) => this.edit(id),
       onDelete: (id) => this.remove(id),
+      onResolve: (id, resolved) => this.resolve(id, resolved),
       onClose: () => this.stop(),
     });
     const { preview, busy } = this.send.state;
@@ -336,6 +417,7 @@ export class PinMode {
       id: pin.id,
       number: index + 1,
       at: anchorOf(pin),
+      status: this.statusOf(pin.id),
     }));
     this.view.renderMarkers(markers, (id) => this.edit(id));
   }
@@ -355,11 +437,11 @@ export class PinMode {
   }
 
   private setMood(mood: SquishMood): void {
-    this.mood = mood;
+    this.flash = mood;
     this.render();
     clearTimeout(this.moodTimer);
     this.moodTimer = setTimeout(() => {
-      this.mood = "waiting";
+      this.flash = null;
       this.render();
     }, MOOD_RESET_MS);
   }

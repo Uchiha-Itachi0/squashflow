@@ -1,6 +1,7 @@
 /**
  * The service worker's side of talking to the helper: pairing, the connection status,
- * sessions for a page, the remembered site-to-repository mapping, preview and send.
+ * sessions for a page, the remembered site-to-repository mapping, preview and send, and
+ * the status of sent pins.
  * Requests from the pin mode script are validated here before anything is done.
  */
 
@@ -14,11 +15,13 @@ import {
   type WorkerRequest,
 } from "./messages";
 import type { SiteRepoStore } from "./sites";
+import type { StatusTracker } from "./tracker";
 
 export interface HelperServiceOptions {
   fetch: FetchLike;
   connections: ConnectionStore;
   sites: SiteRepoStore;
+  tracker: StatusTracker;
 }
 
 type AnyReply = HelperResult<WorkerReplies[keyof WorkerReplies]>;
@@ -59,8 +62,19 @@ export class HelperService {
       case "preview":
         return (await this.client()).preview(request.outgoing);
       case "send":
-        return (await this.client()).send(request.outgoing, request.pinId, request.digest);
+        return this.send(request);
+      case "track":
+        return { ok: true, value: await this.options.tracker.sync() };
+      case "mark":
+        return { ok: true, value: await this.options.tracker.mark(request.pinId, request.mark) };
     }
+  }
+
+  private async send(request: Extract<WorkerRequest, { type: "send" }>): Promise<AnyReply> {
+    if (request.localPinIds.length !== request.outgoing.pins.length) return BAD_REQUEST;
+    const sent = await (await this.client()).send(request.outgoing, request.pinId, request.digest);
+    if (sent.ok) await this.options.tracker.sent(request.localPinIds, sent.value);
+    return sent;
   }
 
   private async status(): Promise<ConnectionStatus> {
