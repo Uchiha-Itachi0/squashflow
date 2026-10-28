@@ -16,6 +16,7 @@ import {
 } from "@squashflow/shared";
 // Namespace import: Parcel (the extension bundler) mis-bundles zod's `z` re-export.
 import * as z from "zod";
+import type { PinStatuses } from "../status/pin-status";
 import { portSchema } from "./connection";
 import type { HelperFailure, HelperResult } from "./errors";
 import { repoNameSchema } from "./sites";
@@ -46,6 +47,15 @@ export const workerRequestSchema = z.discriminatedUnion("type", [
     outgoing: outgoingSchema,
     pinId: pinIdSchema,
     digest: digestSchema,
+    /** The extension's own ids of the pins in the message, in order. */
+    localPinIds: z.array(pinIdSchema).min(1).max(MAX_PINS_PER_MESSAGE),
+  }),
+  /** Re-read the pins in flight from the helper and keep following them. */
+  z.strictObject({ type: z.literal("track") }),
+  z.strictObject({
+    type: z.literal("mark"),
+    pinId: pinIdSchema,
+    mark: z.enum(["resolve", "reopen", "forget"]),
   }),
 ]);
 
@@ -71,6 +81,8 @@ export interface WorkerReplies {
   "remember-site": null;
   preview: PreviewResponse;
   send: PinRecord;
+  track: PinStatuses;
+  mark: PinStatuses;
 }
 
 export type WorkerReply<K extends WorkerRequest["type"]> = HelperResult<WorkerReplies[K]>;

@@ -9,6 +9,8 @@ import pinModeUrl from "url:./inject/pin-mode.ts";
 import { ConnectionStore, indexedDbArea } from "./helper/connection";
 import { HelperService } from "./helper/service";
 import { SiteRepoStore } from "./helper/sites";
+import { StatusTracker } from "./helper/tracker";
+import { PinStatusStore } from "./status/store";
 
 /**
  * Plasmo emits the pin mode script at the extension root under a hashed name. Only the
@@ -16,11 +18,22 @@ import { SiteRepoStore } from "./helper/sites";
  */
 const PIN_MODE_FILE = pinModeUrl.slice(pinModeUrl.lastIndexOf("/") + 1);
 
-const helper = new HelperService({
-  fetch: (url, init) => fetch(url, init),
-  connections: new ConnectionStore(indexedDbArea()),
-  sites: new SiteRepoStore(chrome.storage.local),
+const fetchHelper = (url: string, init: RequestInit): Promise<Response> => fetch(url, init);
+const connections = new ConnectionStore(indexedDbArea());
+const tracker = new StatusTracker({
+  fetch: fetchHelper,
+  connections,
+  store: new PinStatusStore(chrome.storage.local),
 });
+const helper = new HelperService({
+  fetch: fetchHelper,
+  connections,
+  sites: new SiteRepoStore(chrome.storage.local),
+  tracker,
+});
+
+// The worker is stopped when idle and loses its event stream; each start catches up.
+void tracker.sync();
 
 chrome.action.onClicked.addListener((tab) => {
   void togglePinMode(tab);

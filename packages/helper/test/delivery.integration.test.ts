@@ -41,6 +41,16 @@ function peerRecord(body: string): string {
   });
 }
 
+function replyRecords(text: string): string {
+  return [
+    JSON.stringify({
+      type: "assistant",
+      message: { id: "msg_1", role: "assistant", content: [{ type: "text", text }] },
+    }),
+    JSON.stringify({ type: "system", subtype: "turn_duration", durationMs: 900 }),
+  ].join("\n");
+}
+
 function heldNotice(preview: string): string {
   return JSON.stringify({
     type: "system",
@@ -136,6 +146,40 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     ).toBe("seen");
   });
 
+  it("picks up Claude's reply and moves the pin to Fixed with the pull request link", async () => {
+    const { id, message } = await previewAndSend();
+    await appendFile(transcript, `${replyRecords("Too early: not about this pin")}\n`);
+    await appendFile(transcript, `${peerRecord(message)}\n`);
+    await appendFile(
+      transcript,
+      `${replyRecords("Made it violet. https://github.com/acme/demo/pull/12 <img src=x onerror=alert(1)>")}\n`,
+    );
+    const read = async () =>
+      (await send(helper.server.port, { path: `/pins/${id}`, headers: helper.auth() })).json<{
+        pin: {
+          status: string;
+          statusLabel: string;
+          pullRequestUrl: string | null;
+          thread: unknown[];
+          following: boolean;
+        };
+      }>().pin;
+    const pin = await waitFor(read, (value) => value.status === "fixed");
+    expect(pin.status).toBe("fixed");
+    expect(pin.statusLabel).toBe("Fixed");
+    expect(pin.pullRequestUrl).toBe("https://github.com/acme/demo/pull/12");
+    expect(pin.following).toBe(false);
+    expect(pin.thread).toEqual([
+      {
+        id: `${id}-1`,
+        from: "claude",
+        text: "Made it violet. https://github.com/acme/demo/pull/12 <img src=x onerror=alert(1)>",
+        truncated: false,
+        at: expect.any(String) as string,
+      },
+    ]);
+  });
+
   it("streams status changes on /events", async () => {
     const events: string[] = [];
     const stream = httpRequest({
@@ -154,14 +198,17 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     );
     const { id, message } = await previewAndSend();
     await appendFile(transcript, `${peerRecord(message)}\n`);
+    await appendFile(transcript, `${replyRecords("Done: https://github.com/acme/demo/pull/3")}\n`);
     const text = await waitFor(
       () => Promise.resolve(events.join("")),
-      (value) => value.includes('"status":"seen"'),
+      (value) => value.includes('"status":"fixed"'),
     );
     stream.destroy();
     expect(text).toContain("event: pin");
     expect(text).toContain(`"id":"${id}","number":1,"sessionPid":${session.pid}`);
     expect(text).toContain('"status":"seen"');
+    expect(text).toContain('"text":"Done: https://github.com/acme/demo/pull/3"');
+    expect(text).toContain('"pullRequestUrl":"https://github.com/acme/demo/pull/3"');
   });
 
   it("ends an open /events stream when another browser pairs", async () => {
@@ -229,7 +276,7 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     expect(inbox.lines).toHaveLength(1);
   });
 
-  it("stops following the transcript after the watch lifetime", async () => {
+  it("marks a pin Blocked when its transcript stays quiet for the watch lifetime", async () => {
     const delivery = new DeliveryService({
       socketDir: join(dir.path, "socks"),
       claudeConfigDir: join(dir.path, "claude"),
@@ -243,7 +290,35 @@ describe("delivery: POST /pins to Seen by Claude", () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
       await appendFile(transcript, `${peerRecord(draft.message)}\n`);
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(delivery.get(record.id)?.status).toBe("sent");
+      expect(delivery.get(record.id)?.status).toBe("blocked");
+      expect(delivery.get(record.id)?.statusLabel).toBe("Blocked: not picked up");
+    } finally {
+      delivery.close();
+    }
+  });
+
+  it("keeps following while the transcript keeps growing", async () => {
+    const delivery = new DeliveryService({
+      socketDir: join(dir.path, "socks"),
+      claudeConfigDir: join(dir.path, "claude"),
+      senderSocketPath: join(dir.path, "sender.sock"),
+      pollMs: 10,
+      watchMaxMs: 120,
+    });
+    try {
+      const draft = delivery.createDraft(session, "cli", undefined, [{ comment: "Fix it" }]);
+      const record = await delivery.deliver(draft);
+      for (let step = 0; step < 6; step += 1) {
+        await appendFile(transcript, `${JSON.stringify({ type: "progress", step })}\n`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await appendFile(transcript, `${peerRecord(draft.message)}\n`);
+      expect(
+        await waitFor(
+          () => Promise.resolve(delivery.get(record.id)?.status),
+          (value) => value === "seen",
+        ),
+      ).toBe("seen");
     } finally {
       delivery.close();
     }

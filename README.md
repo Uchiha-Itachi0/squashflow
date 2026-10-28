@@ -5,7 +5,7 @@ Pin a comment on any website, and your own Claude Code session fixes it and open
 Squashflow lets you hover over any live or local website and pin a comment on an element, a piece of text, a dragged area, or several elements at once. The comment, along with the page context Claude needs, is delivered to the Claude Code session you already have running in your terminal. That session fixes the code, pushes a branch and opens a pull request with your own GitHub login, then replies on the pin. There is no Squashflow server in the middle: everything except GitHub runs on your own machine.
 
 > **Status: early development.**
-> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level (build step 2), and pairs with the helper, lets you pick a session, previews the exact message and sends it (build step 3). Per-pin status in the browser, replies, the GitHub flow and the dev overlay are not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
+> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level (build step 2), pairs with the helper, lets you pick a session, previews the exact message and sends it (build step 3), and shows each sent pin's status and Claude's reply, with the pull request link once it is fixed (build step 4). The GitHub flow's blocked-access options and the dev overlay are not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
 
 ## Contents
 
@@ -95,8 +95,10 @@ Every pin moves through a visible lifecycle:
 Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──> Resolved
                 │
                 ├──> Approve in terminal   (Claude Code is holding the message for your approval)
-                └──> Blocked               (for example, no push access to the repository)
+                └──> Blocked               (the session never picked the message up; later, no push access)
 ```
+
+The status shows on the pin's marker and in the panel, and Squish's mood follows it: waiting while a pin is only Sent, working while Claude has it, squashed when it is Fixed, and blocked when it needs you. Claude's reply appears under the pin as plain text; a reply with a GitHub pull request link moves the pin to *Fixed* and links the pull request. A batch sent together shares one reply. Mark a pin **Resolved** once you are done with it, typically after merging, and **Reopen** it if not.
 
 ## Fallbacks and edge cases
 
@@ -198,7 +200,9 @@ To send pins straight to a session instead of pasting them:
 3. Pick the session to send to. Each one shows its name, whether it is idle or busy, its repository and its folder. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since.
 4. Press **Send** on a pin, or **Send all**. The panel shows the exact message the session will receive; press **Send to claude@`<name>`** to deliver it, or **Cancel**. The panel then says it was sent, or why not in plain words (for example, the preview expired and needs previewing again).
 
-If the helper is not running, you have not paired, or no session is open on the site's repository, the panel says so and Copy still works. Live status after *Sent* (*Seen by Claude*, *Approve in terminal*) and Claude's replies arrive in build step 4; for now the helper's terminal shows them.
+After sending, each pin shows its [status](#pin-status) on its marker and in the panel: *Sent*, *Seen by Claude* or *Approve in terminal*, then *Fixed* with Claude's reply and the pull request link. Press **Resolve** on a pin when you are done with it, or **Reopen** to undo that. The helper follows a pin until Claude replies; if the session's transcript goes quiet for 30 minutes before the pin is picked up (for example, the session exited), the pin shows *Blocked*. Status and replies arrive while pin mode is open on the page, and catch up the next time you open it.
+
+If the helper is not running, you have not paired, or no session is open on the site's repository, the panel says so and Copy still works.
 
 The extension asks for as little as it can:
 
@@ -206,7 +210,7 @@ The extension asks for as little as it can:
 | --- | --- |
 | `activeTab` | Lets the extension act on the current tab only, and only after you click its button or press its shortcut. There are no host permissions: it cannot read or change any site on its own. |
 | `scripting` | Injects the pin mode script into that tab when you turn pin mode on. Nothing is injected into pages you have not asked for. |
-| `storage` | Keeps your pins, and the sites whose repository you asked it to remember, in the extension's local storage, which web pages cannot read. |
+| `storage` | Keeps your pins, their status and Claude's replies, and the sites whose repository you asked it to remember, in the extension's local storage, which web pages cannot read. |
 
 There is no remote code: everything the extension runs ships inside it. Talking to the helper needs no extra permission: only the extension's background service worker calls it, on `127.0.0.1`, and the helper answers only the paired extension's origin. The pairing token stays in that service worker's own storage, out of reach of web pages and of the script running in the page. It never captures the values of form fields (including password and hidden fields), and every captured field is size-capped; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The pin UI runs inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool.
 
@@ -217,7 +221,7 @@ The planned build order.
 - [x] 1. Helper: list sessions, match repositories, send a pin, confirm delivery
 - [x] 2. Pins and page context in the browser, plus copy-to-clipboard
 - [x] 3. Session picker
-- [ ] 4. Claude replies and pin status
+- [x] 4. Claude replies and pin status
 - [ ] 5. GitHub flow (branch, pull request, blocked-access options)
 - [ ] 6. Chrome extension packaging and region screenshots
 

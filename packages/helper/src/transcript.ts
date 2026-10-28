@@ -3,6 +3,7 @@
  * sends no acknowledgement, so the transcript is the source of truth:
  * - a `user` record with a peer origin carrying the pin marker -> Seen by Claude
  * - a `system` "Held peer message" notice carrying the marker -> Approve in terminal
+ * Claude's reply after that is picked out by `ReplyTracker` (reply.ts).
  */
 
 import { open, readdir, stat } from "node:fs/promises";
@@ -78,12 +79,14 @@ export interface TranscriptWatch {
   stop(): void;
 }
 
-/** Poll the transcript from `startOffset`, reporting each signal for this pin as it appears. */
+/**
+ * Poll the transcript from `startOffset`, handing over each complete line appended
+ * after it. Lines written before delivery are never read.
+ */
 export function watchTranscript(
   path: string,
-  pinId: string,
   startOffset: number,
-  onSignal: (signal: TranscriptSignal) => void,
+  onLine: (line: string) => void,
   pollMs: number = TRANSCRIPT_POLL_MS,
 ): TranscriptWatch {
   let offset = startOffset;
@@ -110,8 +113,8 @@ export function watchTranscript(
       const lines = pending.split("\n");
       pending = lines.pop() ?? "";
       for (const line of lines) {
-        const signal = classifyTranscriptLine(line, pinId);
-        if (signal && !isStopped()) onSignal(signal);
+        if (isStopped()) break;
+        onLine(line);
       }
     } catch {
       // The transcript may not exist yet or be mid-rotation; the next tick retries.

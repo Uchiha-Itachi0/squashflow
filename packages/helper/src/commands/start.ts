@@ -37,10 +37,21 @@ export async function startCommand(term: Terminal, options: StartOptions): Promi
       warn: (text) => out(term.warn(text)),
     },
   };
+  const seen = new Map<string, { status: string; replies: number }>();
   runtime.delivery.subscribe((pin) => {
+    const before = seen.get(pin.id);
+    seen.set(pin.id, { status: pin.status, replies: pin.thread.length });
+    if (pin.thread.length > (before?.replies ?? 0)) {
+      out(term.arrow(`claude@${pin.sessionName} replied to pin ${pin.number}`));
+    }
+    if (pin.status === before?.status) return;
     if (pin.status === "seen") out(term.squashed(`squashed! pin ${pin.number} seen by Claude`));
+    if (pin.status === "fixed") out(term.squashed(`squashed! pin ${pin.number} fixed`));
     if (pin.status === "approve-in-terminal") {
       out(term.warn(`pin ${pin.number}: approve it in the terminal of claude@${pin.sessionName}`));
+    }
+    if (pin.status === "blocked") {
+      out(term.warn(`pin ${pin.number}: claude@${pin.sessionName} never picked it up`));
     }
   });
 

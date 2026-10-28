@@ -15,15 +15,34 @@ import {
   type PreviewProps,
   type SendSectionProps,
 } from "./send-view";
+import type { ShownStatus } from "../status/pin-status";
 import { squishSvg, type SquishMood } from "./squish";
 import { PIN_UI_CSS } from "./styles";
 
 export type PinModeKind = "element" | "text";
 
+/** A sent pin's status as the panel and its marker show it. */
+export interface PinStatusView {
+  status: ShownStatus;
+  label: string;
+  mood: SquishMood;
+  /** Claude's latest reply: untrusted, always rendered as plain text. */
+  reply: { text: string; truncated: boolean } | null;
+  pullRequestUrl: string | null;
+}
+
 export interface PanelPin {
   id: string;
   number: number;
   comment: string;
+  status: PinStatusView | null;
+}
+
+export interface MarkerView {
+  id: string;
+  number: number;
+  at: Rect;
+  status: PinStatusView | null;
 }
 
 export interface PanelProps {
@@ -44,6 +63,7 @@ export interface PanelProps {
   onSendAll: () => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  onResolve: (id: string, resolved: boolean) => void;
   onClose: () => void;
 }
 
@@ -138,17 +158,18 @@ export class PinView {
     );
   }
 
-  renderMarkers(
-    markers: readonly { id: string; number: number; at: Rect }[],
-    onOpen: (id: string) => void,
-  ): void {
+  renderMarkers(markers: readonly MarkerView[], onOpen: (id: string) => void): void {
     this.markerLayer.replaceChildren(
-      ...markers.map(({ id, number, at }) => {
+      ...markers.map(({ id, number, at, status }) => {
         const marker = h("button", {
-          className: "marker",
+          className: status === null ? "marker" : `marker s-${status.status}`,
           text: String(number),
-          title: `Pin ${number}`,
-          attrs: { "data-pin": id, "aria-label": `Edit pin ${number}` },
+          title: status === null ? `Pin ${number}` : `Pin ${number}: ${status.label}`,
+          attrs: {
+            "data-pin": id,
+            "aria-label": `Edit pin ${number}`,
+            ...(status === null ? {} : { "data-status": status.status }),
+          },
           on: { click: () => onOpen(id) },
         });
         marker.style.left = `${at.x}px`;
@@ -285,9 +306,13 @@ function panel(props: PanelProps, fields: PairingFields): HTMLElement {
 }
 
 function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
+  const { status } = pin;
   return h("li", { attrs: { "data-pin": pin.id } }, [
     h("span", { className: "badge", text: String(pin.number) }),
-    h("span", { className: "comment", text: pin.comment, title: pin.comment }),
+    h("div", { className: "body" }, [
+      h("span", { className: "comment", text: pin.comment, title: pin.comment }),
+      status !== null && pinStatus(pin, status, props),
+    ]),
     h("span", { className: "actions" }, [
       props.canSend &&
         h("button", {
@@ -313,6 +338,48 @@ function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
       }),
     ]),
   ]);
+}
+
+/** The status chip, Claude's reply as plain text, the pull request link, Resolve or Reopen. */
+function pinStatus(pin: PanelPin, status: PinStatusView, props: PanelProps): HTMLElement {
+  const mood = h("span", { className: "mini-squish" });
+  // Constant markup chosen by mood; no reply or page text goes into it.
+  mood.innerHTML = squishSvg(status.mood);
+  const resolved = status.status === "resolved";
+  return h("div", { className: "pin-status" }, [
+    h("div", { className: "row" }, [
+      h("span", { className: `chip pin-state s-${status.status}` }, [mood, status.label]),
+      status.pullRequestUrl !== null &&
+        h("a", {
+          className: "pr-link",
+          text: pullRequestLabel(status.pullRequestUrl),
+          attrs: {
+            href: status.pullRequestUrl,
+            target: "_blank",
+            rel: "noopener noreferrer",
+            "aria-label": `Pull request for pin ${pin.number}`,
+          },
+        }),
+      h("span", { className: "spacer" }),
+      h("button", {
+        className: "link",
+        text: resolved ? "Reopen" : "Resolve",
+        attrs: { "aria-label": `${resolved ? "Reopen" : "Resolve"} pin ${pin.number}` },
+        on: { click: () => props.onResolve(pin.id, !resolved) },
+      }),
+    ]),
+    status.reply !== null &&
+      h("p", {
+        className: "reply",
+        text: status.reply.truncated ? `${status.reply.text} … (cut)` : status.reply.text,
+        attrs: { "aria-label": `Claude's reply to pin ${pin.number}` },
+      }),
+  ]);
+}
+
+function pullRequestLabel(url: string): string {
+  const number = /\/pull\/([0-9]+)/.exec(url)?.[1];
+  return number === undefined ? "Pull request" : `PR #${number}`;
 }
 
 function readLevel(value: string): DetailLevel {

@@ -80,7 +80,11 @@ describe("HelperClient", () => {
       "sf-0123456789ab",
       digest,
     );
-    expect(sent).toEqual({ ok: true, value: pin });
+    // A record without thread fields (an older helper) reads with empty defaults.
+    expect(sent).toEqual({
+      ok: true,
+      value: { ...pin, thread: [], pullRequestUrl: null, following: false, revision: 0 },
+    });
     expect(JSON.parse(sendFetch.calls[0]?.init.body as string)).toEqual({
       ...outgoing,
       pinId: "sf-0123456789ab",

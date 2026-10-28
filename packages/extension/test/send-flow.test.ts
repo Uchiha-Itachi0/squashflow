@@ -195,6 +195,10 @@ describe("SendFlow preview then send", () => {
           statusLabel: "Sent",
           createdAt: "x",
           updatedAt: "x",
+          thread: [],
+          pullRequestUrl: null,
+          following: true,
+          revision: 0,
         },
       }),
     });
@@ -220,6 +224,7 @@ describe("SendFlow preview then send", () => {
       outgoing,
       pinId: "sf-0123456789ab",
       digest: DIGEST,
+      localPinIds: ["sf-aaaaaaaaaaaa", "sf-bbbbbbbbbbbb"],
     });
     expect(send.state.preview).toBeNull();
     expect(reports.at(-1)).toEqual(["Sent 2 pins to claude@web.", "ok"]);

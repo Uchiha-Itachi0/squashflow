@@ -73,6 +73,12 @@ export class HelperClient {
     return result.ok ? { ok: true, value: result.value.pin } : result;
   }
 
+  /** A delivered pin's current status and thread. */
+  async pin(id: string): Promise<HelperResult<PinRecord>> {
+    const result = await this.authed("GET", `/pins/${id}`, deliveredResponseSchema);
+    return result.ok ? { ok: true, value: result.value.pin } : result;
+  }
+
   private authed<T>(
     method: string,
     path: string,

@@ -1,23 +1,19 @@
 /**
  * Pin delivery shared by `POST /pins` and `squashflow send`: build a draft the
  * user previews, deliver exactly that draft to the session inbox socket, then
- * follow the transcript from Sent to Seen by Claude (or Approve in terminal).
+ * follow the transcript from Sent to Seen by Claude (or Approve in terminal) and
+ * on to Claude's reply, which moves the pin to Fixed when it links a pull request.
  */
 
 import { randomBytes } from "node:crypto";
 import type { PinRecord, PinStatus } from "@squashflow/shared";
 import { TRANSCRIPT_WATCH_MAX_MS } from "./constants.js";
+import { ReplyTracker, type PinEvent, type Reply } from "./reply.js";
 import { buildMessage, digestMessage, wrapForInbox, type PinSource } from "./message.js";
 import type { PinInput } from "./schemas.js";
 import type { SessionInfo } from "./sessions.js";
 import { inboxSocketPath, writeToInbox } from "./socket.js";
-import {
-  fileSize,
-  locateTranscript,
-  watchTranscript,
-  type TranscriptSignal,
-  type TranscriptWatch,
-} from "./transcript.js";
+import { fileSize, locateTranscript, watchTranscript, type TranscriptWatch } from "./transcript.js";
 
 const DRAFT_TTL_MS = 10 * 60 * 1000;
 
@@ -27,6 +23,8 @@ export const STATUS_LABELS: Record<PinStatus, string> = {
   sent: "Sent",
   "approve-in-terminal": "Approve in terminal",
   seen: "Seen by Claude",
+  fixed: "Fixed",
+  blocked: "Blocked: not picked up",
 };
 
 export interface Draft {
@@ -59,6 +57,7 @@ export interface DeliveryOptions {
   senderSocketPath: string;
   now?: () => number;
   pollMs?: number;
+  /** Stop following a pin after this long with nothing new in its transcript. */
   watchMaxMs?: number;
 }
 
@@ -157,28 +156,48 @@ export class DeliveryService {
       statusLabel: STATUS_LABELS.sent,
       createdAt: stamp,
       updatedAt: stamp,
+      thread: [],
+      pullRequestUrl: null,
+      following: true,
+      revision: 0,
     };
-    this.publish(record);
+    this.follow(draft.pinId, transcript, startOffset);
+    return this.publish(record);
+  }
+
+  /**
+   * Follow the transcript until Claude's reply, or until it has been quiet for the
+   * watch lifetime (session gone, held message rejected). The lifetime restarts on
+   * every new line, so a long piece of work in a busy session is still followed.
+   */
+  private follow(pinId: string, transcript: string, startOffset: number): void {
+    const tracker = new ReplyTracker(pinId);
+    const lifetime = this.options.watchMaxMs ?? TRANSCRIPT_WATCH_MAX_MS;
+    const expire = (): void => {
+      this.onQuiet(pinId);
+    };
+    let expiry = setTimeout(expire, lifetime);
+    expiry.unref();
     const watch = watchTranscript(
       transcript,
-      draft.pinId,
       startOffset,
-      (signal) => {
-        this.onSignal(draft.pinId, signal);
+      (line) => {
+        clearTimeout(expiry);
+        expiry = setTimeout(expire, lifetime);
+        expiry.unref();
+        const event = tracker.feed(line);
+        if (tracker.finished) this.stopWatch(pinId);
+        if (event !== null) this.onEvent(pinId, event);
+        else if (tracker.finished) this.republish(pinId);
       },
       this.options.pollMs,
     );
-    const expiry = setTimeout(() => {
-      this.stopWatch(draft.pinId);
-    }, this.options.watchMaxMs ?? TRANSCRIPT_WATCH_MAX_MS);
-    expiry.unref();
-    this.watches.set(draft.pinId, {
+    this.watches.set(pinId, {
       stop: () => {
         clearTimeout(expiry);
         watch.stop();
       },
     });
-    return record;
   }
 
   get(pinId: string): PinRecord | undefined {
@@ -196,18 +215,61 @@ export class DeliveryService {
     this.listeners.clear();
   }
 
-  private onSignal(pinId: string, signal: TranscriptSignal): void {
+  private onEvent(pinId: string, event: PinEvent): void {
     const current = this.pins.get(pinId);
-    if (!current || current.status === "seen") return;
-    const status: PinStatus = signal === "seen" ? "seen" : "approve-in-terminal";
-    if (status === current.status) return;
-    this.publish({
+    if (!current) return;
+    if (event.kind === "reply") {
+      this.onReply(current, event.reply);
+      return;
+    }
+    if (current.status === "seen") return;
+    const status: PinStatus = event.kind === "seen" ? "seen" : "approve-in-terminal";
+    if (status !== current.status) this.publish(this.withStatus(current, status));
+  }
+
+  private onReply(current: PinRecord, reply: Reply): void {
+    const at = new Date(this.now()).toISOString();
+    const message = {
+      id: `${current.id}-${current.thread.length + 1}`,
+      from: "claude" as const,
+      text: reply.text,
+      truncated: reply.truncated,
+      at,
+    };
+    const fixed = reply.pullRequestUrl !== null;
+    const next: PinRecord = {
+      ...(fixed ? this.withStatus(current, "fixed") : current),
+      thread: [...current.thread, message],
+      pullRequestUrl: reply.pullRequestUrl ?? current.pullRequestUrl,
+      updatedAt: at,
+    };
+    this.publish(next);
+  }
+
+  /** Quiet for the whole watch lifetime: a pin never picked up is Blocked. */
+  private onQuiet(pinId: string): void {
+    this.stopWatch(pinId);
+    const current = this.pins.get(pinId);
+    if (current?.status === "sent" || current?.status === "approve-in-terminal") {
+      this.publish(this.withStatus(current, "blocked"));
+    } else {
+      this.republish(pinId);
+    }
+  }
+
+  /** Publish the pin again after the watch stopped, so clients see it is no longer followed. */
+  private republish(pinId: string): void {
+    const current = this.pins.get(pinId);
+    if (current) this.publish(current);
+  }
+
+  private withStatus(current: PinRecord, status: PinStatus): PinRecord {
+    return {
       ...current,
       status,
       statusLabel: STATUS_LABELS[status],
       updatedAt: new Date(this.now()).toISOString(),
-    });
-    if (status === "seen") this.stopWatch(pinId);
+    };
   }
 
   private stopWatch(pinId: string): void {
@@ -215,9 +277,15 @@ export class DeliveryService {
     this.watches.delete(pinId);
   }
 
-  private publish(record: PinRecord): void {
-    this.pins.set(record.id, record);
-    for (const listener of this.listeners) listener(record);
+  private publish(record: PinRecord): PinRecord {
+    const next = {
+      ...record,
+      following: this.watches.has(record.id),
+      revision: (this.pins.get(record.id)?.revision ?? -1) + 1,
+    };
+    this.pins.set(next.id, next);
+    for (const listener of this.listeners) listener(next);
+    return next;
   }
 
   private dropExpiredDrafts(): void {

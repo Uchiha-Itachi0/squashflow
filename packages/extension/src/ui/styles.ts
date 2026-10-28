@@ -107,7 +107,25 @@ button.danger:hover { border-color: #D93F5B; color: #D93F5B; }
   display: grid;
   place-items: center;
 }
-.comment { flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+.body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.pin-status .row { display: flex; gap: 6px; align-items: center; }
+.pin-status .spacer { flex: 1; }
+.pin-state { display: inline-flex; align-items: center; gap: 4px; padding-left: 2px; }
+.mini-squish { width: 16px; height: 16px; display: inline-block; }
+.mini-squish svg { width: 100%; height: 100%; display: block; }
+.pin-state.s-sent { background: #F1F0F7; color: var(--muted); }
+.pin-state.s-seen { background: #E9E6FF; color: var(--violet-dark); }
+.pin-state.s-approve-in-terminal, .pin-state.s-blocked { background: #FDECEF; color: #D93F5B; }
+.pin-state.s-fixed { background: #E3F6EA; color: #1F7A45; }
+.pin-state.s-resolved { background: #F1F0F7; color: var(--muted); text-decoration: line-through; }
+.pr-link { font-size: 12px; color: var(--violet-dark); }
+.link { border: 0; background: none; padding: 0 2px; color: var(--violet-dark); font-size: 12px; text-decoration: underline; cursor: pointer; }
+.reply { margin: 0; padding: 4px 6px; border-left: 2px solid var(--violet); background: #F6F5FE; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow: auto; }
+.marker.s-seen { background: var(--violet-dark); }
+.marker.s-approve-in-terminal, .marker.s-blocked { background: #D93F5B; }
+.marker.s-fixed { background: #1F9D55; }
+.marker.s-resolved { background: #9A97B0; }
+.comment { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 .actions { display: flex; gap: 4px; flex: none; }
 .actions button { padding: 1px 6px; font-size: 12px; }
 .empty { padding: 12px 10px; color: var(--muted); }

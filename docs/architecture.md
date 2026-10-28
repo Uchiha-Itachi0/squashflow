@@ -1,6 +1,6 @@
 # Squashflow architecture
 
-> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper), and the extension's pins, page context and copy (build step 2) and its pairing, session picker and sending (build step 3) in [`packages/extension`](../packages/extension), with the message builder and the helper's API schemas they share in [`packages/shared`](../packages/shared). The sections on the helper, pairing, discovery, the message, delivery, the extension, sending and copy describe what the code does today. Everything else (per-pin status in the browser, replies, dev overlay, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
+> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper), and the extension's pins, page context and copy (build step 2), its pairing, session picker and sending (build step 3), and its per-pin status and replies (build step 4) in [`packages/extension`](../packages/extension), with the message builder and the helper's API schemas they share in [`packages/shared`](../packages/shared). The sections on the helper, pairing, discovery, the message, delivery and confirmation, the extension, sending, status and copy describe what the code does today. Everything else (dev overlay, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
 
 For a shorter overview, see the [README](../README.md). For the threat model and vulnerability reporting, see [SECURITY.md](../SECURITY.md).
 
@@ -70,8 +70,8 @@ All endpoints except pairing require the pairing token as `Authorization: Bearer
 | `GET /health` | Report that the helper is running and paired, plus its version. |
 | `GET /sessions` | List running Claude Code sessions: `pid`, `name`, `status`, `cwd` and the matched repository (`owner/repo`, or `null`). |
 | `POST /pins` | Preview, then deliver, one pin or a batch to a chosen session. See [Building the message](#building-the-message). |
-| `GET /pins/{id}` | Current status of a delivered pin. |
-| `GET /events` | Server-sent events stream (`event: pin`) of status changes for the paired browser. Browsers' `EventSource` cannot send an `Authorization` header, so the extension reads it with a streaming `fetch`. |
+| `GET /pins/{id}` | A delivered pin's record: `status` and `statusLabel`, Claude's replies as `thread`, `pullRequestUrl` once Fixed, `following` (whether the helper is still watching its transcript) and `revision`, which goes up with every change. `{id}` is the message's pin id; a batch is one message. Records are kept in memory, so a restarted helper answers `404`. |
+| `GET /events` | Server-sent events stream (`event: pin`, the whole record as JSON) of every status change and reply, for the paired browser. Browsers' `EventSource` cannot send an `Authorization` header, so the extension reads it with a streaming `fetch`. |
 
 ### Request checks
 
@@ -129,18 +129,18 @@ The previewed message is the delivered message:
 1. The helper wraps the message as `<cross-session-message from="uds:<helper socket>" from-name="squashflow">…</cross-session-message>` and writes it as one NDJSON line, `{"type":"user","message":{"role":"user","content":…}}`, to the session's inbox socket at `/tmp/cc-socks/<pid>.sock` (`$SQUASHFLOW_INBOX_SOCKET_DIR` overrides the folder, which the browser test uses to deliver to a fake inbox). The helper socket named in `from` is a real socket it listens on, `/tmp/squashflow-<uid>/helper-<pid>.sock` (a short per-user path, so it never contains spaces). The session shows it as "Message from @squashflow" and treats it as a request from another session, never as the user's own typing; Claude Code's permissions still apply.
 2. Before writing, the helper checks the inbox path with `lstat` and refuses anything that is not a socket, is not owned by the current user, or is not mode `0600`. A symlink is refused, not followed. `--bare` sessions have no inbox socket and cannot receive pins.
 3. The pin moves to **Sent**.
-4. The socket sends no acknowledgement, so the helper watches the session's transcript, `<config>/projects/<cwd with every non-alphanumeric character as ->/<sessionId>.jsonl`, where `<config>` is `$CLAUDE_CONFIG_DIR` or `~/.claude`. It reads only lines appended after delivery and matches them on the pin id. It stops watching once the pin is Seen by Claude, or after 30 minutes (for example when the session exited or the held message was rejected).
+4. The socket sends no acknowledgement, so the helper watches the session's transcript, `<config>/projects/<cwd with every non-alphanumeric character as ->/<sessionId>.jsonl`, where `<config>` is `$CLAUDE_CONFIG_DIR` or `~/.claude`. It reads only lines appended after delivery and matches them on the pin id. It keeps watching until Claude's reply (point 8), or until the transcript has had no new lines for 30 minutes (for example when the session exited or the held message was rejected). The 30 minutes restart with every new line, so a long piece of work in a busy session is still followed; a pin still Sent or Approve in terminal when they run out moves to **Blocked** (`Blocked: not picked up`).
 5. When a `user` record with a peer origin carrying the pin id appears, the pin moves to **Seen by Claude**.
 6. If Claude Code is holding the message for approval (a session in bypass-permissions mode records a "Held peer message" notice), the pin moves to **Approve in terminal** until the user approves it there, then to **Seen by Claude**.
 7. If the session is busy, Claude Code queues the message and handles it between steps; the pin stays **Sent** until it appears in the transcript.
-8. When Claude replies, the helper picks the reply out of the transcript and sends it to the extension as a thread message. A reply that includes a pull request link moves the pin to **Fixed**. (Planned.)
-9. The user marks the pin **Resolved**, typically after merging. (Planned.)
+8. When Claude replies, the helper picks the reply out of the transcript and sends it to the extension as a thread message. The reply is the text of Claude's last assistant message in the turn that handled the pin: the turn starts at the peer record carrying the pin id and ends at Claude Code's `turn_duration` notice, or at the next prompt typed in the session. Only text parts count (no thinking, tool calls or images), subagent (sidechain) records and lines over 1 MiB are skipped, control characters are dropped, and the text is capped at 8000 characters (a longer reply is cut and marked as cut). A reply that includes a GitHub pull request link (`https://github.com/<owner>/<repo>/pull/<n>`) moves the pin to **Fixed** with that link; without one, the pin stays Seen by Claude with the reply on its thread. A batch is one message with one pin id, so its reply belongs to every pin in the batch. The reply is untrusted text: the extension only ever renders it as text, and the only link it renders is a pull request link that matches that pattern.
+9. The user marks the pin **Resolved**, typically after merging, and can reopen it. Resolved is kept by the extension only; the helper's status underneath is unchanged.
 
 ```text
 Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──> Resolved
                 │
                 ├──> Approve in terminal
-                └──> Blocked
+                └──> Blocked (not picked up; GitHub access in build step 5)
 ```
 
 ## GitHub flow
@@ -204,9 +204,19 @@ The panel's **Send to Claude Code** section talks to the helper through the serv
 
 1. **Pairing.** The section shows **Not paired**, **Paired**, or **Helper not running** (checked with `GET /health` each time pin mode opens). **Pair with helper** asks for the code `npx squashflow` prints and the helper's port (47821 unless the helper was started with `--port`). A wrong, expired or locked code is explained and nothing is stored. **Re-pair** enters a new code, which replaces the token; **Forget** deletes it. A token the helper no longer accepts (for example after another browser paired) shows as Not paired.
 2. **Session picker.** `GET /sessions` lists each session with its name, idle or busy status, repository and folder. Sessions on the repository remembered for this site come first, marked *this site*; when exactly one matches it is preselected. With a session chosen, **Remember: this site's code is `owner/repo`** saves that mapping for the page's origin in `chrome.storage.local` (key `site-repos`, at most 500 sites); unticking it forgets the site. **Refresh** asks the helper again.
-3. **Preview, then send.** **Send** on a pin, or **Send all**, calls `POST /pins` with `"preview": true` and shows the returned message, exactly as it will be delivered, in a dialog. Nothing is delivered until **Send to claude@`<name>`** is pressed; that repeats the request with the preview's `pinId` and `digest`. The panel then shows *Sent N pins to claude@`<name>`*, or the helper's refusal in plain words: the preview expired or no longer matches (preview again), the session is gone (refresh), the pins are too large, or the inbox socket was refused. Live status after Sent (Seen by Claude, Approve in terminal) and replies arrive with build step 4.
+3. **Preview, then send.** **Send** on a pin, or **Send all**, calls `POST /pins` with `"preview": true` and shows the returned message, exactly as it will be delivered, in a dialog. Nothing is delivered until **Send to claude@`<name>`** is pressed; that repeats the request with the preview's `pinId` and `digest`. The panel then shows *Sent N pins to claude@`<name>`*, or the helper's refusal in plain words: the preview expired or no longer matches (preview again), the session is gone (refresh), the pins are too large, or the inbox socket was refused. Each sent pin then follows its status, as [below](#pin-status-and-replies).
 
 When the helper is not running, not paired, or no session fits, the section says so and the Copy buttons stay available, so copy is always the fallback.
+
+### Pin status and replies
+
+The `send` request carries the extension's own ids of the pins in the message, so the service worker can map the helper's message id back to them.
+
+1. **Storage.** The service worker keeps each sent pin's status, status label, thread, pull request link, Resolved mark, whether the helper is still following it, and the record's revision, in `chrome.storage.local` under one key, `pin-status`, by the extension's pin id (at most 500 pins; the least recently updated go first). It is the only writer, and applies changes one at a time; a record with a lower revision than the stored one is ignored, so a slow `GET /pins/{id}` never undoes a newer event. Everything read back is validated, including that a stored link is a GitHub pull request link. Deleting a pin forgets its status.
+2. **Following.** While any pin is in flight (the helper's `following` flag), the service worker keeps `GET /events` open and applies each record to every pin delivered in that message; when nothing is in flight it closes the stream. Each time the stream opens, it re-reads `GET /pins/{id}` for the pins in flight, to catch up on anything published before. A Manifest V3 service worker is stopped when idle and loses its stream, so it also catches up whenever it starts, and the pin mode script asks it to (`track`) when pin mode opens and every 20 seconds while a pin on the page is in flight, which also keeps it running. A message the helper no longer knows (`404` after a restart) stops being followed, keeping the last status.
+3. **Display.** The pin mode script reads the statuses and listens for changes to them. Each sent pin's marker is coloured by status and titled with it, and its row in the panel shows the status with a small Squish in the matching mood, Claude's latest reply as plain text, the pull request link (`PR #<n>`, opening in a new tab with `noopener noreferrer`) and **Resolve** or **Reopen**. Squish in the panel header follows the page's pins: blocked when one is Blocked or Approve in terminal, working while one is Seen by Claude, waiting while one is only Sent, squashed when the rest are Fixed; Resolved pins no longer count. After an action (copy, send, a failure) it shows that action's mood for a moment first.
+
+Follow-up messages on a pin's thread are not supported yet.
 
 ### Copy
 
@@ -240,7 +250,7 @@ Copy detail levels. Each level adds to the one before; key attributes are `id`, 
 ## Local data
 
 - Helper state (pairing token hash, extension origin) is stored in `~/.squashflow/state.json`, readable and writable only by the user.
-- Pins are stored in the extension's local storage, per page (see [Storage](#storage)). Threads will be too.
+- Pins are stored in the extension's local storage, per page (see [Storage](#storage)), and sent pins' status and threads under one key (see [Pin status and replies](#pin-status-and-replies)).
 - The pairing token and helper port are stored in the extension service worker's IndexedDB; remembered site-to-repository mappings in the extension's local storage.
 - Nothing is sent to a Squashflow server, because there is none, and there is no telemetry.
 
@@ -253,7 +263,7 @@ The helper needs Claude Code **2.1.224** or later: the first release with the se
 1. Helper: list sessions, match repositories, send, confirm. (Done.)
 2. Pins and page context in the browser, plus copy. (Done.)
 3. Session picker. (Done.)
-4. Claude replies and pin status.
+4. Claude replies and pin status. (Done.)
 5. GitHub flow.
 6. Chrome extension packaging and region screenshots.
 

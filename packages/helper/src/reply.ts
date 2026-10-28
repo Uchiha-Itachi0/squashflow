@@ -1,0 +1,132 @@
+/**
+ * Following one delivered pin through the session transcript, line by line:
+ * Sent -> (Approve in terminal) -> Seen by Claude -> Claude's reply.
+ *
+ * The reply is the text of Claude's last assistant message in the turn that handled
+ * the pin: the turn starts at the peer record carrying the pin id and ends at Claude
+ * Code's `turn_duration` notice, or at the next prompt if that notice is missing.
+ * Only text parts count (no thinking, tool calls or images), subagent (sidechain)
+ * records are skipped, and the text is untrusted: it is capped and sent on as plain text.
+ */
+
+import { MAX_REPLY_CHARS, PULL_REQUEST_URL_PATTERN } from "@squashflow/shared";
+import { classifyTranscriptLine } from "./transcript.js";
+
+/** Lines longer than this are skipped unparsed (request blobs, huge tool output). */
+export const MAX_TRANSCRIPT_LINE_CHARS = 1024 * 1024;
+
+export interface Reply {
+  text: string;
+  truncated: boolean;
+  /** The first GitHub pull request link in the reply, if any. */
+  pullRequestUrl: string | null;
+}
+
+export type PinEvent = { kind: "seen" } | { kind: "held" } | { kind: "reply"; reply: Reply };
+
+type Phase = "delivered" | "turn" | "done";
+
+export class ReplyTracker {
+  private phase: Phase = "delivered";
+  private messageId: string | null = null;
+  private text = "";
+
+  constructor(private readonly pinId: string) {}
+
+  /** Whether the reply was found, or the turn ended without one; nothing more will come. */
+  get finished(): boolean {
+    return this.phase === "done";
+  }
+
+  /** Feed one transcript line; returns what it means for this pin, if anything. */
+  feed(line: string): PinEvent | null {
+    if (this.phase === "done" || line.length > MAX_TRANSCRIPT_LINE_CHARS) return null;
+    if (this.phase === "delivered") {
+      const signal = classifyTranscriptLine(line, this.pinId);
+      if (signal === "seen") this.phase = "turn";
+      return signal === null ? null : { kind: signal };
+    }
+    const record = parseRecord(line);
+    if (record === null || record.isSidechain === true) return null;
+    if (record.type === "assistant") {
+      this.collect(record);
+      return null;
+    }
+    if (endsTurn(record)) return this.finish();
+    return null;
+  }
+
+  private collect(record: Record<string, unknown>): void {
+    const message = record.message;
+    if (!isObject(message)) return;
+    const text = textParts(message.content);
+    if (text === "") return;
+    const id = typeof message.id === "string" ? message.id : null;
+    // Claude Code writes one record per content block, all with the message's id.
+    const joined = id !== null && id === this.messageId ? `${this.text}\n\n${text}` : text;
+    this.messageId = id;
+    // Keep one character past the cap, so a cut reply is known to be cut.
+    this.text = joined.slice(0, MAX_REPLY_CHARS + 1);
+  }
+
+  private finish(): PinEvent | null {
+    this.phase = "done";
+    const text = cleanText(this.text);
+    if (text === "") return null;
+    const truncated = text.length > MAX_REPLY_CHARS;
+    const kept = truncated ? text.slice(0, MAX_REPLY_CHARS) : text;
+    return {
+      kind: "reply",
+      reply: { text: kept, truncated, pullRequestUrl: findPullRequestUrl(kept) },
+    };
+  }
+}
+
+export function findPullRequestUrl(text: string): string | null {
+  return PULL_REQUEST_URL_PATTERN.exec(text)?.[0] ?? null;
+}
+
+/** The end of the turn: Claude Code's turn timing notice, or the next prompt. */
+function endsTurn(record: Record<string, unknown>): boolean {
+  if (record.type === "system") return record.subtype === "turn_duration";
+  // Another peer message queued mid-turn is handled in the same turn, so it does not end it.
+  if (record.type !== "user" || record.isMeta === true || isObject(record.origin)) return false;
+  const message = record.message;
+  if (!isObject(message)) return false;
+  const { content } = message;
+  if (typeof content === "string") return true;
+  // Tool results come back as user records inside the same turn.
+  return Array.isArray(content) && content.some((part) => isObject(part) && part.type === "text");
+}
+
+function textParts(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((part: unknown) =>
+      isObject(part) && part.type === "text" && typeof part.text === "string"
+        ? [part.text.trim()]
+        : [],
+    )
+    .filter((text) => text !== "")
+    .join("\n\n");
+}
+
+/** Drop control characters other than newline and tab; the text is shown as plain text. */
+function cleanText(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").trim();
+}
+
+function parseRecord(line: string): Record<string, unknown> | null {
+  try {
+    const record: unknown = JSON.parse(line);
+    return isObject(record) ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

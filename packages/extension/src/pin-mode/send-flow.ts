@@ -16,6 +16,8 @@ export type ConnectionView = { state: "checking"; port: number } | ConnectionSta
 
 export interface PendingPreview {
   outgoing: OutgoingPins;
+  /** The extension's own ids of the pins in the message, in order. */
+  localPinIds: readonly string[];
   session: PublicSession;
   pinId: string;
   digest: string;
@@ -158,7 +160,8 @@ export class SendFlow {
         this.fail(reply.failure);
         return;
       }
-      this.update({ preview: { outgoing, session, ...reply.value } });
+      const localPinIds = pins.map((pin) => pin.id);
+      this.update({ preview: { outgoing, localPinIds, session, ...reply.value } });
     });
   }
 
@@ -176,6 +179,7 @@ export class SendFlow {
         outgoing: preview.outgoing,
         pinId: preview.pinId,
         digest: preview.digest,
+        localPinIds: [...preview.localPinIds],
       });
       this.update({ preview: null });
       if (!reply.ok) {

@@ -3,6 +3,8 @@ import type { FetchLike } from "../src/helper/client";
 import { ConnectionStore, type SecretArea } from "../src/helper/connection";
 import { HelperService } from "../src/helper/service";
 import { SiteRepoStore } from "../src/helper/sites";
+import { StatusTracker } from "../src/helper/tracker";
+import { PinStatusStore } from "../src/status/store";
 import type { StorageAreaLike } from "../src/store/pins";
 
 const TOKEN = "tok_0123456789abcdefghij";
@@ -53,7 +55,17 @@ function setup(routes: Record<string, Route>) {
   const fetch = helperFetch(routes);
   const connections = new ConnectionStore(memorySecrets());
   const sites = new SiteRepoStore(memoryArea());
-  return { fetch, connections, sites, service: new HelperService({ fetch, connections, sites }) };
+  const tracker = new StatusTracker({
+    fetch,
+    connections,
+    store: new PinStatusStore(memoryArea()),
+  });
+  return {
+    fetch,
+    connections,
+    sites,
+    service: new HelperService({ fetch, connections, sites, tracker }),
+  };
 }
 
 const healthy: Route = () => ({ status: 200, body: { ok: true, paired: true, version: "0.1.0" } });
@@ -146,7 +158,13 @@ describe("HelperService sessions and sending", () => {
       ok: true,
       value: { pinId: "sf-0123456789ab", digest, message: "m" },
     });
-    const sent = await service.handle({ type: "send", outgoing, pinId: "sf-0123456789ab", digest });
+    const sent = await service.handle({
+      type: "send",
+      outgoing,
+      pinId: "sf-0123456789ab",
+      digest,
+      localPinIds: ["sf-aaaaaaaaaaaa"],
+    });
     expect(!sent.ok && sent.failure.kind).toBe("expired");
     expect(bodies[1]).toEqual({ ...outgoing, pinId: "sf-0123456789ab", digest });
   });
@@ -160,6 +178,14 @@ describe("HelperService sessions and sending", () => {
       { type: "sessions", pageUrl: "javascript:alert(1)" },
       { type: "preview", outgoing: { session: 1, pageUrl: PAGE, pins: [] } },
       { type: "send", outgoing: { session: 1, pageUrl: PAGE, pins: [{ comment: "x" }] } },
+      {
+        type: "send",
+        outgoing: { session: 1, pageUrl: PAGE, pins: [{ comment: "x" }] },
+        pinId: "sf-0123456789ab",
+        digest: "b".repeat(64),
+        localPinIds: ["sf-aaaaaaaaaaaa", "sf-bbbbbbbbbbbb"],
+      },
+      { type: "mark", pinId: "sf-aaaaaaaaaaaa", mark: "delete" },
       { type: "remember-site", pageUrl: PAGE, repo: "../../etc" },
     ]) {
       const reply = await service.handle(request);
