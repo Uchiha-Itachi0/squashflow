@@ -1,13 +1,14 @@
 /**
- * P2, pick a session: the Claude Code sessions running on this laptop as cards, the ones
- * on the site's remembered repository first and marked "Matches this site", each with
- * what the helper knows to tell them apart (title, folder, repository and branch, when
- * it was last active). Session names, titles and folders are untrusted plain text.
+ * P2, pick a session: the Claude Code sessions running on this laptop, from every Claude
+ * account, as cards, the ones on the site's remembered repository first and marked
+ * "Matches this site". Each card leads with the session's own name (its title, else its
+ * terminal's label, else its folder) and the terminal label, then the account,
+ * repository, branch, state and last activity. All of it is untrusted plain text.
  */
 
-import type { PublicSession } from "@squashflow/shared";
+import { sessionDisplayName, type PublicSession } from "@squashflow/shared";
 import { h } from "../../ui/dom";
-import { sessionTimes, shortPath, shortUrl } from "../format";
+import { shortPath, shortUrl, timeAgo } from "../format";
 import type { PanelActions, PanelModel } from "../model";
 import { connectView } from "./connect";
 
@@ -76,7 +77,7 @@ export function sessionsView(model: PanelModel, actions: PanelActions): HTMLElem
         }),
         h("button", {
           className: "btn primary grow",
-          text: chosen === null ? "Pick a session" : `Use ${chosen.name}`,
+          text: chosen === null ? "Pick a session" : `Use ${sessionDisplayName(chosen)}`,
           attrs: { type: "button", ...(chosen === null ? { disabled: "" } : {}) },
           on: { click: actions.useSession },
         }),
@@ -101,40 +102,61 @@ function sessionCard(
       type: "radio",
       name: "squashflow-session",
       value: String(session.pid),
-      "aria-label": `${session.name}${session.title === null ? "" : `, ${session.title}`}`,
+      "aria-label": [sessionDisplayName(session), session.terminal, session.account?.label]
+        .filter(Boolean)
+        .join(", "),
     },
     on: { change: () => actions.selectSession(session.pid) },
   });
   radio.checked = selected;
-  const when = sessionTimes(session, model.now);
-  const where = [shortPath(session.cwd), session.repo].filter(Boolean).join(" · ");
-  return h("label", { className: selected ? "ses selected" : "ses", title: session.cwd }, [
+  const name = sessionDisplayName(session);
+  const terminal = session.terminal !== null && session.terminal !== name ? session.terminal : null;
+  const details = [
+    session.account?.label ?? null,
+    session.repo ?? (session.cwd === "" ? null : shortPath(session.cwd)),
+    session.branch,
+  ].filter((part) => part !== null);
+  return h("label", { className: selected ? "ses selected" : "ses", title: cardTooltip(session) }, [
     radio,
     h("span", { className: "info" }, [
       h("span", { className: "name" }, [
-        h("b", { text: session.name }),
-        matches && h("span", { className: "chip accent", text: "Matches this site" }),
+        h("b", { text: name }),
+        terminal !== null && h("span", { className: "term", text: terminal }),
       ]),
-      session.title !== null && h("span", { className: "about", text: session.title }),
-      h("span", { className: "where", text: where }),
-      session.branch !== null &&
-        h("span", { className: "where", text: `branch ${session.branch}` }),
-      stateLine(session, when),
+      h("span", { className: "where" }, [
+        details.length > 0 && `${details.join(" · ")} · `,
+        stateLine(session, timeAgo(session.lastActiveAt, model.now)),
+      ]),
+      matches && h("span", { className: "chip accent", text: "Matches this site" }),
     ]),
   ]);
 }
 
-function stateLine(session: PublicSession, when: string): HTMLElement {
-  const busy = session.status === "busy";
-  const label = busy
-    ? "Busy · picks it up between steps"
-    : session.status === "idle"
-      ? "Idle · ready"
-      : "Status unknown";
-  return h("span", { className: `state ${session.status}` }, [
-    h("span", { className: `dot ${session.status}` }),
-    when === "" ? label : `${label} · ${when}`,
-  ]);
+/** Everything else the helper knows, on hover: folder, account email, raw session name. */
+function cardTooltip(session: PublicSession): string {
+  return [
+    session.cwd,
+    session.account?.email ?? null,
+    `session ${session.name} · pid ${session.pid}`,
+  ]
+    .filter((part) => part !== null && part !== "")
+    .join("\n");
+}
+
+/** "busy · 2m ago", coloured by state; a busy session picks pins up between steps. */
+function stateLine(session: PublicSession, active: string): HTMLElement {
+  const label = session.status === "idle" || session.status === "busy" ? session.status : "unknown";
+  return h(
+    "span",
+    {
+      className: `state ${session.status}`,
+      ...(session.status === "busy" ? { title: "Busy: picks pins up between steps" } : {}),
+    },
+    [
+      h("span", { className: `dot ${session.status}` }),
+      active === "" ? label : `${label} · ${active}`,
+    ],
+  );
 }
 
 function rememberBox(model: PanelModel, actions: PanelActions): HTMLElement | null {

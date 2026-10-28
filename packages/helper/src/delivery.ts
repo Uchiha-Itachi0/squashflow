@@ -81,7 +81,6 @@ export class DraftError extends Error {
 
 export interface DeliveryOptions {
   socketDir: string;
-  claudeConfigDir: string;
   senderSocketPath: string;
   /** Where region screenshots are written; without it, pins with screenshots are refused. */
   screenshotDir?: string;
@@ -237,11 +236,7 @@ export class DeliveryService {
         `Session ${session.name} has no session id, so delivery cannot be confirmed.`,
       );
     }
-    const transcript = await locateTranscript(
-      this.options.claudeConfigDir,
-      session.cwd,
-      session.sessionId,
-    );
+    const transcript = await locateTranscript(session.configDir, session.cwd, session.sessionId);
     const startOffset = await fileSize(transcript);
     const content = wrapForInbox(message, this.options.senderSocketPath);
     await writeToInbox(inboxSocketPath(this.options.socketDir, session.pid), content);

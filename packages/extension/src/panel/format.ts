@@ -1,19 +1,8 @@
 /** Small text helpers for the side panel. */
 
-import type { PublicSession } from "@squashflow/shared";
-
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
-
-/** "started 3h ago · active 2m ago", from what the helper knows; empty when it knows neither. */
-export function sessionTimes(session: PublicSession, now: number): string {
-  const started = timeAgo(session.startedAt, now);
-  const active = timeAgo(session.lastActiveAt, now);
-  return [started && `started ${started}`, active && `active ${active}`]
-    .filter(Boolean)
-    .join(" · ");
-}
 
 /** "just now", "5m ago", "3h ago", "2d ago"; empty when the time is unknown. */
 export function timeAgo(iso: string | number | null, now: number): string {

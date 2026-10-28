@@ -337,7 +337,9 @@ function sessionChip(props: ToolbarProps): HTMLButtonElement {
     "button",
     {
       className: "tb session",
-      title: "Choose which Claude Code session gets the pins",
+      title: ["Choose which Claude Code session gets the pins", target?.session?.detail ?? ""]
+        .filter(Boolean)
+        .join("\n"),
       attrs: { type: "button", "aria-label": `Session: ${label}` },
       on: { click: props.onSession },
     },

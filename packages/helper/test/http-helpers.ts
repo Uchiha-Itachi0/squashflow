@@ -71,7 +71,6 @@ export async function startTestHelper(
   const pairing = new PairingCodes();
   const delivery = new DeliveryService({
     socketDir: join(dir, "socks"),
-    claudeConfigDir: join(dir, "claude"),
     senderSocketPath: join(dir, "sender.sock"),
     screenshotDir: join(dir, "screenshots"),
     pollMs: 20,
@@ -86,7 +85,9 @@ export async function startTestHelper(
     pairing,
     savePairing: () => Promise.resolve(),
     delivery,
-    discover: () => Promise.resolve(sessions),
+    // Every test session runs under the test's own account folder.
+    discover: () =>
+      Promise.resolve(sessions.map((session) => ({ ...session, configDir: join(dir, "claude") }))),
     log: { info: () => undefined, arrow: () => undefined, warn: () => undefined },
   };
   const server = await startServer(context);

@@ -60,7 +60,11 @@ describe("listSessions", () => {
         ? Promise.resolve("git@github.com:acme/alpha.git\n")
         : Promise.reject(new Error("no remote"));
     };
-    const sessions = await listSessions(run, config.path);
+    const sessions = await listSessions(run, {
+      socketDir: join(config.path, "no-sockets"),
+      env: { CLAUDE_CONFIG_DIR: config.path },
+      home: config.path,
+    });
     expect(sessions.map((s) => [s.pid, s.name, s.repo?.fullName ?? null])).toEqual([
       [1, "alpha", "acme/alpha"],
       [2, "pid-2", null],
@@ -78,6 +82,7 @@ describe("listSessions", () => {
       lastActiveAt: null,
     });
     expect(calls[0]).toEqual({ file: "claude", args: ["agents", "--json"], cwd: undefined });
+    expect(sessions[0]?.configDir).toBe(config.path);
     expect(calls.slice(1).map((c) => [c.file, c.args, c.cwd])).toEqual([
       ["git", ["remote", "get-url", "origin"], "/a"],
       ["git", ["symbolic-ref", "--short", "-q", "HEAD"], "/a"],
@@ -88,7 +93,9 @@ describe("listSessions", () => {
   });
 
   it("explains non-JSON output", async () => {
-    await expect(listSessions(() => Promise.resolve("oops"))).rejects.toThrow(/did not print JSON/);
+    await expect(
+      listSessions(() => Promise.resolve("oops"), { socketDir: "/nonexistent", env: {} }),
+    ).rejects.toThrow(/did not print JSON/);
   });
 });
 

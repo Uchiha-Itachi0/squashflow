@@ -86,8 +86,11 @@ test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
   const demo = panel.getByRole("radio", { name: /e2e-demo/ });
   await expect(demo).not.toBeChecked();
   await expect(panel.getByRole("radio", { name: /e2e-other/ })).not.toBeChecked();
-  await expect(panel.getByText(/acme\/demo$/)).toBeVisible();
-  await expect(panel.getByText(/^Busy · picks it up between steps/)).toBeVisible();
+  // Each card: its name (no title yet, so its folder), then repository · branch · state.
+  const demoCard = panel.locator("label.ses", { has: demo });
+  await expect(demoCard.locator(".name b")).toHaveText("e2e-demo");
+  await expect(demoCard.locator(".where")).toHaveText(/^acme\/demo · .*idle/);
+  await expect(panel.getByTitle("Busy: picks pins up between steps")).toHaveText(/^busy/);
   await expect(panel.getByRole("button", { name: "Start new session" })).toBeDisabled();
   await demo.check();
   await panel.getByRole("checkbox", { name: /Remember: this site's code is acme\/demo/ }).check();

@@ -5,7 +5,7 @@
  * With pin mode off on the tab, a way to turn it on.
  */
 
-import { DETAIL_LEVELS, type DetailLevel } from "@squashflow/shared";
+import { DETAIL_LEVELS, sessionDisplayName, type DetailLevel } from "@squashflow/shared";
 import { buildCopyText } from "../../copy/copy";
 import { shownLabel } from "../../status/pin-status";
 import type { StoredPin } from "../../store/pins";
@@ -37,7 +37,7 @@ export function pinsView(model: PanelModel, actions: PanelActions): HTMLElement[
       ? "Pick a session first"
       : drafts.length === 0
         ? `Go · nothing to send`
-        : `Go · send ${drafts.length === 1 ? "1 pin" : `${drafts.length} pins`} to ${target.name}`;
+        : `Go · send ${drafts.length === 1 ? "1 pin" : `${drafts.length} pins`} to ${sessionDisplayName(target)}`;
   return [
     h("div", { className: "scroll" }, [
       targetBar(model, actions),
@@ -88,7 +88,7 @@ function targetBar(model: PanelModel, actions: PanelActions): HTMLElement {
       h("span", { className: `dot ${target?.status ?? ""}` }),
       target === null
         ? h("span", { text: "No session picked yet" })
-        : h("span", {}, ["Sending to ", h("b", { text: target.name })]),
+        : h("span", {}, ["Sending to ", h("b", { text: sessionDisplayName(target) })]),
       target !== null && h("span", { className: "soft", text: `· ${target.status}` }),
       h("span", { className: "spacer" }),
       h("button", {

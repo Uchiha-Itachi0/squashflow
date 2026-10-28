@@ -102,6 +102,8 @@ describe("matchSessions", () => {
     branch: null,
     startedAt: null,
     lastActiveAt: null,
+    account: null,
+    terminal: null,
   });
 
   it("preselects the one session on the page's repository", () => {

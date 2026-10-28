@@ -19,6 +19,8 @@ const session = {
   branch: "fix/contrast",
   startedAt: "2026-10-01T12:00:00.000Z",
   lastActiveAt: "2026-10-01T12:30:00.000Z",
+  account: { label: "Acme", email: "dev@acme.dev" },
+  terminal: "~web",
 };
 
 type Route = (init: RequestInit) => { status: number; body: unknown } | "down";

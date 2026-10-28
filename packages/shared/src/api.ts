@@ -59,6 +59,21 @@ export const healthResponseSchema = z.object({
 export const MAX_SESSION_TITLE_CHARS = 80;
 /** Longest branch name the helper reports. */
 export const MAX_BRANCH_CHARS = 100;
+/** Longest account label and email the helper reports. */
+export const MAX_ACCOUNT_LABEL_CHARS = 60;
+export const MAX_ACCOUNT_EMAIL_CHARS = 254;
+/** Longest terminal label (a herdr workspace name) the helper reports. */
+export const MAX_TERMINAL_LABEL_CHARS = 60;
+
+/**
+ * The Claude account a session runs under, from that account's own `.claude.json`: a
+ * short label (its organisation, or else its email's domain) and its email. Nothing else
+ * about the account leaves the helper.
+ */
+export const sessionAccountSchema = z.object({
+  label: z.string().max(MAX_ACCOUNT_LABEL_CHARS),
+  email: z.string().max(MAX_ACCOUNT_EMAIL_CHARS).nullable(),
+});
 
 /** A running Claude Code session as `GET /sessions` reports it. */
 export const publicSessionSchema = z.object({
@@ -80,7 +95,29 @@ export const publicSessionSchema = z.object({
   startedAt: z.string().max(40).nullable().default(null),
   /** When the session last wrote to its transcript, ISO 8601. */
   lastActiveAt: z.string().max(40).nullable().default(null),
+  /** The Claude account the session runs under; null when it could not be read. */
+  account: sessionAccountSchema.nullable().default(null),
+  /**
+   * The name of the terminal workspace the session runs in (a herdr workspace such as
+   * `~vma`), when the helper could ask the terminal. Untrusted plain text on one line.
+   */
+  terminal: z.string().max(MAX_TERMINAL_LABEL_CHARS).nullable().default(null),
 });
+
+/**
+ * The name a session goes by in the picker: its own title, else its terminal's label,
+ * else its folder's name, and its raw `claude agents` name only as a last resort.
+ */
+export function sessionDisplayName(
+  session: Pick<PublicSession, "name" | "title" | "terminal" | "cwd">,
+): string {
+  const folder =
+    session.cwd
+      .split(/[\\/]/)
+      .filter((part) => part !== "")
+      .at(-1) ?? "";
+  return session.title ?? session.terminal ?? (folder === "" ? session.name : folder);
+}
 
 export const sessionsResponseSchema = z.object({ sessions: z.array(publicSessionSchema) });
 
@@ -167,6 +204,7 @@ export type PinBlock = z.infer<typeof pinBlockSchema>;
 export type PairResponse = z.infer<typeof pairResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type PublicSession = z.infer<typeof publicSessionSchema>;
+export type SessionAccount = z.infer<typeof sessionAccountSchema>;
 export type PreviewResponse = z.infer<typeof previewResponseSchema>;
 export type PinStatus = (typeof PIN_STATUSES)[number];
 export type PinRecord = z.infer<typeof pinRecordSchema>;
