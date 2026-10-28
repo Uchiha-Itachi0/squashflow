@@ -9,3 +9,6 @@ declare module "data-base64:*" {
   const dataUrl: string;
   export default dataUrl;
 }
+
+/** A stylesheet imported for its side effect; Plasmo bundles it with the page. */
+declare module "*.css";
