@@ -2,11 +2,19 @@
  * Pin delivery shared by `POST /pins` and `squashflow send`: build a draft the
  * user previews, deliver exactly that draft to the session inbox socket, then
  * follow the transcript from Sent to Seen by Claude (or Approve in terminal) and
- * on to Claude's reply, which moves the pin to Fixed when it links a pull request.
+ * on to Claude's reply, which moves the pin to Fixed when it links a pull request, or to
+ * Blocked: GitHub access when it carries the pin's blocked line. A pin blocked on GitHub
+ * access can be sent previewed follow-ups (retry, fork, patch) to the same session.
  */
 
 import { randomBytes } from "node:crypto";
-import type { PinRecord, PinStatus } from "@squashflow/shared";
+import {
+  buildFollowUp,
+  type FollowUpAction,
+  type PinBlock,
+  type PinRecord,
+  type PinStatus,
+} from "@squashflow/shared";
 import { TRANSCRIPT_WATCH_MAX_MS } from "./constants.js";
 import { ReplyTracker, type PinEvent, type Reply } from "./reply.js";
 import { buildMessage, digestMessage, wrapForInbox, type PinSource } from "./message.js";
@@ -27,6 +35,9 @@ export const STATUS_LABELS: Record<PinStatus, string> = {
   blocked: "Blocked: not picked up",
 };
 
+const GITHUB_ACCESS_LABEL = "Blocked: GitHub access";
+const NOT_PICKED_UP: PinBlock = { kind: "not-picked-up", reason: null };
+
 export interface Draft {
   pinId: string;
   session: SessionInfo;
@@ -38,7 +49,16 @@ export interface Draft {
   expiresAt: number;
 }
 
-export type DraftErrorReason = "missing" | "changed" | "no-session-id";
+export interface FollowUpDraft {
+  pinId: string;
+  action: FollowUpAction;
+  message: string;
+  digest: string;
+  expiresAt: number;
+}
+
+export type DraftErrorReason =
+  "missing" | "changed" | "no-session-id" | "unknown-pin" | "not-blocked";
 
 export class DraftError extends Error {
   override readonly name = "DraftError";
@@ -65,6 +85,12 @@ export type PinListener = (pin: PinRecord) => void;
 
 export class DeliveryService {
   private readonly drafts = new Map<string, Draft>();
+  /** The latest previewed follow-up per pin. */
+  private readonly followUps = new Map<string, FollowUpDraft>();
+  /** The session each pin was delivered to, so follow-ups go to the same one. */
+  private readonly sessions = new Map<string, SessionInfo>();
+  /** The block to return to after a patch request is answered without a new outcome. */
+  private readonly resumeBlocked = new Map<string, PinBlock>();
   private readonly pins = new Map<string, PinRecord>();
   private readonly watches = new Map<string, TranscriptWatch>();
   private readonly listeners = new Set<PinListener>();
@@ -131,21 +157,8 @@ export class DeliveryService {
 
   private async deliverOnce(draft: Draft): Promise<PinRecord> {
     const { session } = draft;
-    if (session.sessionId === null) {
-      throw new DraftError(
-        "no-session-id",
-        `Session ${session.name} has no session id, so delivery cannot be confirmed.`,
-      );
-    }
-    const transcript = await locateTranscript(
-      this.options.claudeConfigDir,
-      session.cwd,
-      session.sessionId,
-    );
-    const startOffset = await fileSize(transcript);
-    const content = wrapForInbox(draft.message, this.options.senderSocketPath);
-    await writeToInbox(inboxSocketPath(this.options.socketDir, session.pid), content);
-
+    await this.writeAndFollow(draft.pinId, session, draft.message);
+    this.sessions.set(draft.pinId, session);
     const stamp = new Date(this.now()).toISOString();
     const record: PinRecord = {
       id: draft.pinId,
@@ -158,11 +171,91 @@ export class DeliveryService {
       updatedAt: stamp,
       thread: [],
       pullRequestUrl: null,
+      blocked: null,
       following: true,
       revision: 0,
     };
-    this.follow(draft.pinId, transcript, startOffset);
     return this.publish(record);
+  }
+
+  /** Write a message to the session's inbox and follow its transcript from there. */
+  private async writeAndFollow(
+    pinId: string,
+    session: SessionInfo,
+    message: string,
+  ): Promise<void> {
+    if (session.sessionId === null) {
+      throw new DraftError(
+        "no-session-id",
+        `Session ${session.name} has no session id, so delivery cannot be confirmed.`,
+      );
+    }
+    const transcript = await locateTranscript(
+      this.options.claudeConfigDir,
+      session.cwd,
+      session.sessionId,
+    );
+    const startOffset = await fileSize(transcript);
+    const content = wrapForInbox(message, this.options.senderSocketPath);
+    await writeToInbox(inboxSocketPath(this.options.socketDir, session.pid), content);
+    this.follow(pinId, transcript, startOffset);
+  }
+
+  /** The session a pin was delivered to. */
+  sessionOf(pinId: string): SessionInfo | undefined {
+    return this.sessions.get(pinId);
+  }
+
+  /** Build a follow-up for a pin blocked on GitHub access; the user previews it first. */
+  createFollowUp(pinId: string, action: FollowUpAction): FollowUpDraft {
+    this.blockedOnGitHub(pinId);
+    const message = buildFollowUp(pinId, action);
+    const draft: FollowUpDraft = {
+      pinId,
+      action,
+      message,
+      digest: digestMessage(message),
+      expiresAt: this.now() + DRAFT_TTL_MS,
+    };
+    this.followUps.set(pinId, draft);
+    return draft;
+  }
+
+  /** Find the previewed follow-up; only the exact message the user saw is delivered. */
+  verifyFollowUp(pinId: string, action: FollowUpAction, digest: string): FollowUpDraft {
+    this.blockedOnGitHub(pinId);
+    const draft = this.followUps.get(pinId);
+    if (draft === undefined || draft.expiresAt <= this.now()) {
+      this.followUps.delete(pinId);
+      throw new DraftError("missing", "No preview of that follow-up; preview it again.");
+    }
+    if (draft.action !== action || draft.digest !== digest) {
+      throw new DraftError("changed", "The follow-up changed since it was previewed.");
+    }
+    return draft;
+  }
+
+  /** Deliver a previewed follow-up to the pin's session and follow the pin again. */
+  async deliverFollowUp(draft: FollowUpDraft, session: SessionInfo): Promise<PinRecord> {
+    const current = this.blockedOnGitHub(draft.pinId);
+    this.followUps.delete(draft.pinId);
+    await this.writeAndFollow(draft.pinId, session, draft.message);
+    if (draft.action === "patch" && current.blocked !== null) {
+      this.resumeBlocked.set(draft.pinId, current.blocked);
+    } else {
+      this.resumeBlocked.delete(draft.pinId);
+    }
+    return this.publish(this.withStatus(current, "sent"));
+  }
+
+  /** The pin, if it is Blocked: GitHub access and no longer followed; throws otherwise. */
+  private blockedOnGitHub(pinId: string): PinRecord {
+    const current = this.pins.get(pinId);
+    if (current === undefined) throw new DraftError("unknown-pin", "No pin with that id.");
+    if (current.blocked?.kind !== "github-access" || this.watches.has(pinId)) {
+      throw new DraftError("not-blocked", "Follow-ups are only for pins blocked on GitHub access.");
+    }
+    return current;
   }
 
   /**
@@ -236,22 +329,43 @@ export class DeliveryService {
       truncated: reply.truncated,
       at,
     };
-    const fixed = reply.pullRequestUrl !== null;
+    const resume = this.resumeBlocked.get(current.id);
+    this.resumeBlocked.delete(current.id);
+    const after = this.afterReply(current, reply, resume);
     const next: PinRecord = {
-      ...(fixed ? this.withStatus(current, "fixed") : current),
+      ...after,
       thread: [...current.thread, message],
-      pullRequestUrl: reply.pullRequestUrl ?? current.pullRequestUrl,
+      // Only a reply that fixes the pin sets its link; a blocked reply may mention others.
+      pullRequestUrl: after.status === "fixed" ? reply.pullRequestUrl : current.pullRequestUrl,
       updatedAt: at,
     };
     this.publish(next);
   }
 
+  /**
+   * The status a reply leads to. The blocked line wins over a link, since a session that
+   * reports no access may still mention other pull requests. A reply to a patch request
+   * that reports neither returns the pin to the block it was in.
+   */
+  private afterReply(current: PinRecord, reply: Reply, resume: PinBlock | undefined): PinRecord {
+    if (reply.blocked !== null) {
+      return this.withStatus(current, "blocked", {
+        kind: "github-access",
+        reason: reply.blocked.reason,
+      });
+    }
+    if (reply.pullRequestUrl !== null) return this.withStatus(current, "fixed");
+    if (resume !== undefined) return this.withStatus(current, "blocked", resume);
+    return current;
+  }
+
   /** Quiet for the whole watch lifetime: a pin never picked up is Blocked. */
   private onQuiet(pinId: string): void {
     this.stopWatch(pinId);
+    this.resumeBlocked.delete(pinId);
     const current = this.pins.get(pinId);
     if (current?.status === "sent" || current?.status === "approve-in-terminal") {
-      this.publish(this.withStatus(current, "blocked"));
+      this.publish(this.withStatus(current, "blocked", NOT_PICKED_UP));
     } else {
       this.republish(pinId);
     }
@@ -263,11 +377,17 @@ export class DeliveryService {
     if (current) this.publish(current);
   }
 
-  private withStatus(current: PinRecord, status: PinStatus): PinRecord {
+  private withStatus(
+    current: PinRecord,
+    status: PinStatus,
+    blocked: PinBlock | null = null,
+  ): PinRecord {
+    const kept = status === "blocked" ? blocked : null;
     return {
       ...current,
       status,
-      statusLabel: STATUS_LABELS[status],
+      statusLabel: kept?.kind === "github-access" ? GITHUB_ACCESS_LABEL : STATUS_LABELS[status],
+      blocked: kept,
       updatedAt: new Date(this.now()).toISOString(),
     };
   }

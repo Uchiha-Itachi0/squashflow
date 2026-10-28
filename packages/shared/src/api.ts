@@ -6,6 +6,7 @@
 
 // Namespace import: Parcel (the extension bundler) mis-bundles zod's `z` re-export.
 import * as z from "zod";
+import { FOLLOW_UP_ACTIONS, MAX_BLOCKED_REASON_CHARS } from "./github.js";
 import { pageUrlSchema, pinSchema } from "./schemas.js";
 
 /** The default port the helper listens on, on 127.0.0.1. */
@@ -33,6 +34,16 @@ export const pinsRequestSchema = z.strictObject({
   preview: z.boolean().optional(),
   /** From the preview response; required to deliver. */
   pinId: pinIdSchema.optional(),
+  digest: digestSchema.optional(),
+});
+
+/**
+ * A follow-up to a pin that is Blocked: GitHub access, sent to the session that has it.
+ * Like a pin, it is previewed first and delivered only with the preview's digest.
+ */
+export const followUpRequestSchema = z.strictObject({
+  action: z.enum(FOLLOW_UP_ACTIONS),
+  preview: z.boolean().optional(),
   digest: digestSchema.optional(),
 });
 
@@ -65,7 +76,8 @@ export const previewResponseSchema = z.object({
 
 /**
  * A delivered pin's status as the helper reports it: Sent, Approve in terminal, Seen by
- * Claude, Fixed (Claude replied with a pull request link) or Blocked (never picked up).
+ * Claude, Fixed (Claude replied with a pull request link) or Blocked (never picked up, or
+ * the session reported it lacks GitHub access).
  * Resolved is the user's own mark and lives only in the extension.
  */
 export const PIN_STATUSES = ["sent", "approve-in-terminal", "seen", "fixed", "blocked"] as const;
@@ -100,6 +112,13 @@ export const threadMessageSchema = z.object({
   at: z.string().max(40),
 });
 
+/** Why a pin is Blocked: never picked up, or no GitHub access with the session's reason. */
+export const pinBlockSchema = z.object({
+  kind: z.enum(["not-picked-up", "github-access"]),
+  /** The session's one-line reason; untrusted plain text. */
+  reason: z.string().max(MAX_BLOCKED_REASON_CHARS).nullable(),
+});
+
 export const pinRecordSchema = z.object({
   id: pinIdSchema,
   number: z.number().int().positive(),
@@ -113,6 +132,8 @@ export const pinRecordSchema = z.object({
   thread: z.array(threadMessageSchema).max(MAX_THREAD_MESSAGES).default([]),
   /** The pull request link from Claude's reply, once the pin is Fixed. */
   pullRequestUrl: pullRequestUrlSchema.nullable().default(null),
+  /** Why the pin is Blocked, while it is. */
+  blocked: pinBlockSchema.nullable().default(null),
   /** Whether the helper is still following the transcript for this pin. */
   following: z.boolean().default(false),
   /** Goes up with every change, so a client can tell a stale read from a newer event. */
@@ -125,6 +146,8 @@ export const errorResponseSchema = z.object({ error: z.string() });
 
 export type PairRequest = z.infer<typeof pairRequestSchema>;
 export type PinsRequest = z.infer<typeof pinsRequestSchema>;
+export type FollowUpRequest = z.infer<typeof followUpRequestSchema>;
+export type PinBlock = z.infer<typeof pinBlockSchema>;
 export type PairResponse = z.infer<typeof pairResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type PublicSession = z.infer<typeof publicSessionSchema>;

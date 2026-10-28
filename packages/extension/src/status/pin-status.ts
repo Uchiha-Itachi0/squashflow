@@ -9,6 +9,7 @@
 import {
   MAX_THREAD_MESSAGES,
   PIN_STATUSES,
+  pinBlockSchema,
   pinIdSchema,
   pullRequestUrlSchema,
   threadMessageSchema,
@@ -30,6 +31,8 @@ export const pinTrackingSchema = z.strictObject({
   statusLabel: z.string().max(200),
   pullRequestUrl: pullRequestUrlSchema.nullable(),
   thread: z.array(threadMessageSchema).max(MAX_THREAD_MESSAGES),
+  /** Why the pin is Blocked, while it is; GitHub access offers the four ways out. */
+  blocked: pinBlockSchema.nullable().default(null),
   resolved: z.boolean(),
   /** Whether the helper is still following the message (no reply yet, not Blocked). */
   inFlight: z.boolean(),
@@ -149,6 +152,7 @@ function fromRecord(record: PinRecord, resolved: boolean, now: number): PinTrack
     statusLabel: record.statusLabel,
     pullRequestUrl: record.pullRequestUrl,
     thread: record.thread,
+    blocked: record.blocked,
     resolved,
     inFlight: record.following,
     revision: record.revision,

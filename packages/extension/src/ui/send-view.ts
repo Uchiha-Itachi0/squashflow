@@ -197,7 +197,7 @@ export interface PreviewProps {
 }
 
 export function previewDialog({ preview, busy, onConfirm, onCancel }: PreviewProps): HTMLElement {
-  const to = `claude@${preview.session.name}`;
+  const to = `claude@${preview.sessionName}`;
   return h(
     "section",
     { className: "preview", attrs: { role: "dialog", "aria-label": "Message preview" } },

@@ -21,6 +21,8 @@ import { chromeStatusSource, type StatusSource } from "../status/store";
 import { pinPageUrl, type PinStore, type StoredPin } from "../store/pins";
 import type { SquishMood } from "../ui/squish";
 import { PinView, type PinModeKind, type PinStatusView } from "../ui/view";
+import type { GitHubChoice } from "../ui/github-view";
+import { GitHubActions } from "./github-actions";
 import { SendFlow } from "./send-flow";
 
 const MOOD_RESET_MS = 2500;
@@ -53,6 +55,7 @@ export class PinMode {
   private unwatch: () => void = () => undefined;
   private readonly listeners: [string, EventListener, Window | Document][] = [];
   private readonly send: SendFlow;
+  private readonly github: GitHubActions;
 
   constructor(
     private readonly store: PinStore,
@@ -68,6 +71,16 @@ export class PinMode {
         this.setStatus(text, outcome === "error");
         this.setMood(outcome === "error" ? "blocked" : "squashed");
       },
+    });
+    this.github = new GitHubActions({
+      send: this.send,
+      pageUrl: () => pinPageUrl(location.href),
+      copy: (text) => writeClipboard(text, this.view.host.shadowRoot ?? this.view.host),
+      report: (text) => {
+        this.setStatus(text);
+        this.setMood("squashed");
+      },
+      onChange: () => this.render(),
     });
   }
 
@@ -323,6 +336,14 @@ export class PinMode {
     });
   }
 
+  private chooseGitHub(id: string, choice: GitHubChoice): void {
+    const index = this.pins.findIndex((pin) => pin.id === id);
+    const pin = this.pins[index];
+    const tracking = this.statuses[id];
+    if (pin === undefined || tracking === undefined) return;
+    void this.run(() => this.github.choose(choice, pin, index + 1, tracking));
+  }
+
   private statusOf(id: string): PinStatusView | null {
     const tracking = this.statuses[id];
     if (tracking === undefined) return null;
@@ -334,6 +355,7 @@ export class PinMode {
       mood: moodForStatus(status),
       reply: latest === undefined ? null : { text: latest.text, truncated: latest.truncated },
       pullRequestUrl: tracking.pullRequestUrl,
+      github: this.github.view(id, tracking),
     };
   }
 
@@ -396,6 +418,7 @@ export class PinMode {
       onEdit: (id) => this.edit(id),
       onDelete: (id) => this.remove(id),
       onResolve: (id, resolved) => this.resolve(id, resolved),
+      onGitHub: (id, choice) => this.chooseGitHub(id, choice),
       onClose: () => this.stop(),
     });
     const { preview, busy } = this.send.state;

@@ -120,6 +120,10 @@ button.danger:hover { border-color: #D93F5B; color: #D93F5B; }
 .pin-state.s-resolved { background: #F1F0F7; color: var(--muted); text-decoration: line-through; }
 .pr-link { font-size: 12px; color: var(--violet-dark); }
 .link { border: 0; background: none; padding: 0 2px; color: var(--violet-dark); font-size: 12px; text-decoration: underline; cursor: pointer; }
+.github { display: flex; flex-direction: column; gap: 4px; }
+.github .options { display: flex; flex-wrap: wrap; gap: 4px; }
+.github .login { display: flex; gap: 6px; align-items: center; }
+.github .spacer { flex: 1; }
 .reply { margin: 0; padding: 4px 6px; border-left: 2px solid var(--violet); background: #F6F5FE; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow: auto; }
 .marker.s-seen { background: var(--violet-dark); }
 .marker.s-approve-in-terminal, .marker.s-blocked { background: #D93F5B; }

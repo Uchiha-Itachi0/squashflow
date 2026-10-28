@@ -6,6 +6,8 @@
 
 import {
   deliveredResponseSchema,
+  type FollowUpAction,
+  type FollowUpRequest,
   errorResponseSchema,
   healthResponseSchema,
   pairResponseSchema,
@@ -70,6 +72,31 @@ export class HelperClient {
   ): Promise<HelperResult<PinRecord>> {
     const body: PinsRequest = { ...outgoing, pinId, digest };
     const result = await this.authed("POST", "/pins", deliveredResponseSchema, body);
+    return result.ok ? { ok: true, value: result.value.pin } : result;
+  }
+
+  /** Build the exact follow-up for a pin blocked on GitHub access, without delivering it. */
+  followUpPreview(
+    messageId: string,
+    action: FollowUpAction,
+  ): Promise<HelperResult<PreviewResponse>> {
+    const body: FollowUpRequest = { action, preview: true };
+    return this.authed("POST", `/pins/${messageId}/follow-up`, previewResponseSchema, body);
+  }
+
+  /** Deliver the previewed follow-up; the helper refuses anything that differs from it. */
+  async followUp(
+    messageId: string,
+    action: FollowUpAction,
+    digest: string,
+  ): Promise<HelperResult<PinRecord>> {
+    const body: FollowUpRequest = { action, digest };
+    const result = await this.authed(
+      "POST",
+      `/pins/${messageId}/follow-up`,
+      deliveredResponseSchema,
+      body,
+    );
     return result.ok ? { ok: true, value: result.value.pin } : result;
   }
 

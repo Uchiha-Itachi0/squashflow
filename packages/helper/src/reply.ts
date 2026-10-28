@@ -7,9 +7,16 @@
  * Code's `turn_duration` notice, or at the next prompt if that notice is missing.
  * Only text parts count (no thinking, tool calls or images), subagent (sidechain)
  * records are skipped, and the text is untrusted: it is capped and sent on as plain text.
+ * A reply carrying the pin's blocked line (see `findBlockedReport`) reports that the
+ * session lacks GitHub access.
  */
 
-import { MAX_REPLY_CHARS, PULL_REQUEST_URL_PATTERN } from "@squashflow/shared";
+import {
+  findBlockedReport,
+  MAX_REPLY_CHARS,
+  PULL_REQUEST_URL_PATTERN,
+  type BlockedReport,
+} from "@squashflow/shared";
 import { classifyTranscriptLine } from "./transcript.js";
 
 /** Lines longer than this are skipped unparsed (request blobs, huge tool output). */
@@ -20,6 +27,8 @@ export interface Reply {
   truncated: boolean;
   /** The first GitHub pull request link in the reply, if any. */
   pullRequestUrl: string | null;
+  /** The session's report that it lacks GitHub access, when the reply carries the blocked line. */
+  blocked: BlockedReport | null;
 }
 
 export type PinEvent = { kind: "seen" } | { kind: "held" } | { kind: "reply"; reply: Reply };
@@ -77,7 +86,12 @@ export class ReplyTracker {
     const kept = truncated ? text.slice(0, MAX_REPLY_CHARS) : text;
     return {
       kind: "reply",
-      reply: { text: kept, truncated, pullRequestUrl: findPullRequestUrl(kept) },
+      reply: {
+        text: kept,
+        truncated,
+        pullRequestUrl: findPullRequestUrl(kept),
+        blocked: findBlockedReport(kept, this.pinId),
+      },
     };
   }
 }

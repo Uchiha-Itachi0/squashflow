@@ -5,7 +5,7 @@ Pin a comment on any website, and your own Claude Code session fixes it and open
 Squashflow lets you hover over any live or local website and pin a comment on an element, a piece of text, a dragged area, or several elements at once. The comment, along with the page context Claude needs, is delivered to the Claude Code session you already have running in your terminal. That session fixes the code, pushes a branch and opens a pull request with your own GitHub login, then replies on the pin. There is no Squashflow server in the middle: everything except GitHub runs on your own machine.
 
 > **Status: early development.**
-> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level (build step 2), pairs with the helper, lets you pick a session, previews the exact message and sends it (build step 3), and shows each sent pin's status and Claude's reply, with the pull request link once it is fixed (build step 4). The GitHub flow's blocked-access options and the dev overlay are not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
+> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level (build step 2), pairs with the helper, lets you pick a session, previews the exact message and sends it (build step 3), shows each sent pin's status and Claude's reply, with the pull request link once it is fixed (build step 4), and asks the session to open the pull request with your own `gh` login, offering a way out when it cannot (build step 5). The dev overlay is not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
 
 ## Contents
 
@@ -95,7 +95,7 @@ Every pin moves through a visible lifecycle:
 Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──> Resolved
                 │
                 ├──> Approve in terminal   (Claude Code is holding the message for your approval)
-                └──> Blocked               (the session never picked the message up; later, no push access)
+                └──> Blocked               (the session never picked the message up, or it has no GitHub access)
 ```
 
 The status shows on the pin's marker and in the panel, and Squish's mood follows it: waiting while a pin is only Sent, working while Claude has it, squashed when it is Fixed, and blocked when it needs you. Claude's reply appears under the pin as plain text; a reply with a GitHub pull request link moves the pin to *Fixed* and links the pull request. A batch sent together shares one reply. Mark a pin **Resolved** once you are done with it, typically after merging, and **Reopen** it if not.
@@ -107,7 +107,7 @@ The status shows on the pin's marker and in the panel, and Squish's mood follows
 | No Claude Code session connected | Copy-and-paste mode: the pin is formatted as text you can paste into any session or tool. Detail levels: compact, standard, detailed, forensic. Pins are saved locally in the browser. |
 | A site you do not own (for example, YouTube) | Same copy-and-paste mode. There is no repository to fix, so nothing is delivered to a session. |
 | Session is in bypass-permissions mode | Claude Code holds the incoming message until you approve it in the terminal. The pin shows *Approve in terminal*. |
-| No push access to the repository | The pin shows *Blocked: GitHub access* with options: log in (`gh auth login`), fork and open a pull request from the fork, copy the patch, or ask the owner. |
+| No push access to the repository | The pin shows *Blocked: GitHub access* with the session's reason and four options: log in (`gh auth login`, then retry), fork and open a pull request from the fork, copy the patch, or ask the owner. See [When GitHub says no](#when-github-says-no). |
 | Several sessions on the same repository | You pick which session receives the pin. |
 | The session is busy | The message still arrives. Claude handles it between steps of its current work. |
 
@@ -204,6 +204,17 @@ After sending, each pin shows its [status](#pin-status) on its marker and in the
 
 If the helper is not running, you have not paired, or no session is open on the site's repository, the panel says so and Copy still works.
 
+### When GitHub says no
+
+Every message asks the session to commit the fix on a new branch, push it and open a pull request with `gh pr create`, all with your own `git` and `gh` login; Squashflow never sees a GitHub token. If the push or the pull request fails because you lack access, the session stops instead of retrying and replies with a fixed line, `SQUASHFLOW-BLOCKED [sf-…] github-access: <reason>`, which moves the pin to *Blocked: GitHub access*. The pin then offers:
+
+- **Log in:** shows `gh auth login` to run in a terminal, then **Retry**, which sends the session a follow-up to push and open the pull request again.
+- **Fork and open a PR:** sends a follow-up asking the session to fork the repository and open the pull request from the fork.
+- **Copy the patch:** copies the diff from Claude's reply. If no reply has one yet, it first sends a follow-up asking the session for it; press it again once Claude replies.
+- **Ask the owner:** copies a ready-made message for the repository owner, with your comment and Claude's summary of the change.
+
+Follow-ups go to the session that has the pin and, like pins, are shown in full and sent only when you press **Send to claude@`<name>`**.
+
 The extension asks for as little as it can:
 
 | Permission | Why |
@@ -222,7 +233,7 @@ The planned build order.
 - [x] 2. Pins and page context in the browser, plus copy-to-clipboard
 - [x] 3. Session picker
 - [x] 4. Claude replies and pin status
-- [ ] 5. GitHub flow (branch, pull request, blocked-access options)
+- [x] 5. GitHub flow (branch, pull request, blocked-access options)
 - [ ] 6. Chrome extension packaging and region screenshots
 
 ## Comparison and credits

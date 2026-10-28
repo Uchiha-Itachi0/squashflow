@@ -48,6 +48,17 @@ export class StatusTracker {
     await this.follow();
   }
 
+  /** A follow-up was delivered: apply the helper's record and follow the message again. */
+  async followedUp(record: PinRecord): Promise<void> {
+    await this.change((statuses) => applyRecord(statuses, record, this.now()));
+    await this.follow();
+  }
+
+  /** The helper's id for the message that carried one of the extension's pins. */
+  async messageIdOf(localPinId: string): Promise<string | null> {
+    return (await this.options.store.list())[localPinId]?.messageId ?? null;
+  }
+
   /** Re-read every in-flight pin from the helper, then keep the stream open if needed. */
   async sync(): Promise<PinStatuses> {
     await this.refresh();

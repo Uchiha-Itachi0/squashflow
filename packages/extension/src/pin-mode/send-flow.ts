@@ -1,11 +1,11 @@
 /**
  * Sending pins to a Claude Code session from the panel: pairing, the session picker
- * and preview-then-send. All helper calls go through the service worker. When the
+ * and preview-then-send, also for follow-ups to a pin blocked on GitHub access. All helper calls go through the service worker. When the
  * helper is not running, not paired, or no session fits, copy stays available and the
  * panel says why.
  */
 
-import { DEFAULT_HELPER_PORT, type PublicSession } from "@squashflow/shared";
+import { DEFAULT_HELPER_PORT, type FollowUpAction, type PublicSession } from "@squashflow/shared";
 import type { HelperFailure } from "../helper/errors";
 import { matchSessions } from "../helper/matching";
 import type { AskWorker, ConnectionStatus } from "../helper/messages";
@@ -14,15 +14,37 @@ import type { StoredPin } from "../store/pins";
 
 export type ConnectionView = { state: "checking"; port: number } | ConnectionStatus;
 
-export interface PendingPreview {
-  outgoing: OutgoingPins;
-  /** The extension's own ids of the pins in the message, in order. */
-  localPinIds: readonly string[];
-  session: PublicSession;
+interface PreviewBase {
+  /** The session that will receive the message. */
+  sessionName: string;
   pinId: string;
   digest: string;
   message: string;
 }
+
+/** Pins about to be sent to the chosen session. */
+export interface PinsPreview extends PreviewBase {
+  kind: "pins";
+  outgoing: OutgoingPins;
+  /** The extension's own ids of the pins in the message, in order. */
+  localPinIds: readonly string[];
+}
+
+/** A follow-up about to be sent to the session that has the pin. */
+export interface FollowUpPreview extends PreviewBase {
+  kind: "follow-up";
+  /** The extension's own id of the pin the follow-up is about. */
+  localPinId: string;
+  action: FollowUpAction;
+}
+
+export type PendingPreview = PinsPreview | FollowUpPreview;
+
+export const FOLLOW_UP_LABELS: Record<FollowUpAction, string> = {
+  retry: "Retry after logging in",
+  fork: "Fork and open a PR",
+  patch: "Ask for the patch",
+};
 
 export interface SendState {
   connection: ConnectionView;
@@ -161,7 +183,31 @@ export class SendFlow {
         return;
       }
       const localPinIds = pins.map((pin) => pin.id);
-      this.update({ preview: { outgoing, localPinIds, session, ...reply.value } });
+      this.update({
+        preview: { kind: "pins", outgoing, localPinIds, sessionName: session.name, ...reply.value },
+      });
+    });
+  }
+
+  /**
+   * Ask the helper for the exact follow-up to a pin blocked on GitHub access. It goes to
+   * the session that has the pin, so no session needs to be chosen; nothing is delivered
+   * until `confirm`.
+   */
+  async previewFollowUp(
+    localPinId: string,
+    action: FollowUpAction,
+    sessionName: string,
+  ): Promise<void> {
+    await this.busy(async () => {
+      const reply = await this.hooks.ask({ type: "follow-up-preview", pinId: localPinId, action });
+      if (!reply.ok) {
+        this.fail(reply.failure);
+        return;
+      }
+      this.update({
+        preview: { kind: "follow-up", localPinId, action, sessionName, ...reply.value },
+      });
     });
   }
 
@@ -173,6 +219,10 @@ export class SendFlow {
   async confirm(): Promise<void> {
     const preview = this.current.preview;
     if (preview === null) return;
+    if (preview.kind === "follow-up") {
+      await this.confirmFollowUp(preview);
+      return;
+    }
     await this.busy(async () => {
       const reply = await this.hooks.ask({
         type: "send",
@@ -189,6 +239,29 @@ export class SendFlow {
       const count = preview.outgoing.pins.length;
       const what = count === 1 ? "1 pin" : `${count} pins`;
       this.hooks.report(`Sent ${what} to claude@${reply.value.sessionName}.`, "ok");
+    });
+  }
+
+  private async confirmFollowUp(preview: FollowUpPreview): Promise<void> {
+    await this.busy(async () => {
+      const reply = await this.hooks.ask({
+        type: "follow-up-send",
+        pinId: preview.localPinId,
+        action: preview.action,
+        digest: preview.digest,
+      });
+      this.update({ preview: null });
+      if (!reply.ok) {
+        this.fail(reply.failure);
+        return;
+      }
+      const to = `claude@${reply.value.sessionName}`;
+      this.hooks.report(
+        preview.action === "patch"
+          ? `Asked ${to} for the patch. Press Copy the patch again once it replies.`
+          : `Sent "${FOLLOW_UP_LABELS[preview.action]}" to ${to}.`,
+        "ok",
+      );
     });
   }
 

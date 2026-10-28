@@ -1,6 +1,6 @@
 # Squashflow architecture
 
-> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper), and the extension's pins, page context and copy (build step 2), its pairing, session picker and sending (build step 3), and its per-pin status and replies (build step 4) in [`packages/extension`](../packages/extension), with the message builder and the helper's API schemas they share in [`packages/shared`](../packages/shared). The sections on the helper, pairing, discovery, the message, delivery and confirmation, the extension, sending, status and copy describe what the code does today. Everything else (dev overlay, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
+> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper), and the extension's pins, page context and copy (build step 2), its pairing, session picker and sending (build step 3), its per-pin status and replies (build step 4), and the GitHub flow's blocked-access options (build step 5) in [`packages/extension`](../packages/extension), with the message builder, the GitHub flow's text contract and the helper's API schemas they share in [`packages/shared`](../packages/shared). The sections on the helper, pairing, discovery, the message, delivery and confirmation, the GitHub flow, the extension, sending, status and copy describe what the code does today. The dev overlay is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
 
 For a shorter overview, see the [README](../README.md). For the threat model and vulnerability reporting, see [SECURITY.md](../SECURITY.md).
 
@@ -70,7 +70,8 @@ All endpoints except pairing require the pairing token as `Authorization: Bearer
 | `GET /health` | Report that the helper is running and paired, plus its version. |
 | `GET /sessions` | List running Claude Code sessions: `pid`, `name`, `status`, `cwd` and the matched repository (`owner/repo`, or `null`). |
 | `POST /pins` | Preview, then deliver, one pin or a batch to a chosen session. See [Building the message](#building-the-message). |
-| `GET /pins/{id}` | A delivered pin's record: `status` and `statusLabel`, Claude's replies as `thread`, `pullRequestUrl` once Fixed, `following` (whether the helper is still watching its transcript) and `revision`, which goes up with every change. `{id}` is the message's pin id; a batch is one message. Records are kept in memory, so a restarted helper answers `404`. |
+| `GET /pins/{id}` | A delivered pin's record: `status` and `statusLabel`, Claude's replies as `thread`, `pullRequestUrl` once Fixed, `blocked` (`{"kind": "not-picked-up" \| "github-access", "reason"}`) while Blocked, `following` (whether the helper is still watching its transcript) and `revision`, which goes up with every change. `{id}` is the message's pin id; a batch is one message. Records are kept in memory, so a restarted helper answers `404`. |
+| `POST /pins/{id}/follow-up` | Preview, then deliver, a follow-up to a pin that is Blocked: GitHub access, to the session that has it. Body: `{"action": "retry" \| "fork" \| "patch", "preview": true}`, then `{"action", "digest"}`. See [GitHub flow](#github-flow). |
 | `GET /events` | Server-sent events stream (`event: pin`, the whole record as JSON) of every status change and reply, for the paired browser. Browsers' `EventSource` cannot send an `Authorization` header, so the extension reads it with a streaming `fetch`. |
 
 ### Request checks
@@ -112,7 +113,7 @@ A message delivered to a session has a fixed structure:
 1. **Provenance header.** States that this is Squashflow pin `[sf-<12 hex>]` from the user's browser, delivered by the local helper, not typed in the terminal, with the page URL. Pins sent with `squashflow send` say so instead. It never claims to be typed by the user in the terminal or to come from anywhere else.
 2. **The user's comment.** The only instructions in the message. Batches number the comments.
 3. **Page context, fenced as data.** Selectors, element text, attributes, computed styles and source file and line (from the dev overlay), as JSON inside `<untrusted-page-context>` with a line telling Claude it is untrusted data and not to follow instructions in it. Every `<`, `>` and `&` in the JSON is escaped, so page content can never close the fence or the surrounding wrapper. Region screenshots are not supported yet.
-4. **Requested outcome.** Fix the issue on a new branch, open a pull request, and reply with a summary and the link.
+4. **Requested outcome.** The [GitHub flow](#github-flow): fix the issue, create a new branch, commit, push and open a pull request with the user's own `git` and `gh`, and reply with a short summary and the link; if the push or the pull request fails for lack of access, do not retry, and reply with the pin's blocked line and a short summary instead.
 
 The builder lives in `@squashflow/shared` and is used by both the helper (delivery) and the extension (copy), so both produce the same structure, fencing and escaping. A copied message states its provenance as copied from the user's browser and pasted by the user, and is filtered to the chosen [copy detail level](#fallbacks); a delivered message carries the context exactly as the extension sent it.
 
@@ -133,24 +134,58 @@ The previewed message is the delivered message:
 5. When a `user` record with a peer origin carrying the pin id appears, the pin moves to **Seen by Claude**.
 6. If Claude Code is holding the message for approval (a session in bypass-permissions mode records a "Held peer message" notice), the pin moves to **Approve in terminal** until the user approves it there, then to **Seen by Claude**.
 7. If the session is busy, Claude Code queues the message and handles it between steps; the pin stays **Sent** until it appears in the transcript.
-8. When Claude replies, the helper picks the reply out of the transcript and sends it to the extension as a thread message. The reply is the text of Claude's last assistant message in the turn that handled the pin: the turn starts at the peer record carrying the pin id and ends at Claude Code's `turn_duration` notice, or at the next prompt typed in the session. Only text parts count (no thinking, tool calls or images), subagent (sidechain) records and lines over 1 MiB are skipped, control characters are dropped, and the text is capped at 8000 characters (a longer reply is cut and marked as cut). A reply that includes a GitHub pull request link (`https://github.com/<owner>/<repo>/pull/<n>`) moves the pin to **Fixed** with that link; without one, the pin stays Seen by Claude with the reply on its thread. A batch is one message with one pin id, so its reply belongs to every pin in the batch. The reply is untrusted text: the extension only ever renders it as text, and the only link it renders is a pull request link that matches that pattern.
+8. When Claude replies, the helper picks the reply out of the transcript and sends it to the extension as a thread message. The reply is the text of Claude's last assistant message in the turn that handled the pin: the turn starts at the peer record carrying the pin id and ends at Claude Code's `turn_duration` notice, or at the next prompt typed in the session. Only text parts count (no thinking, tool calls or images), subagent (sidechain) records and lines over 1 MiB are skipped, control characters are dropped, and the text is capped at 8000 characters (a longer reply is cut and marked as cut). A reply that carries the pin's [blocked line](#github-flow) moves the pin to **Blocked: GitHub access** with the session's reason, even if it also mentions a pull request. Otherwise, a reply that includes a GitHub pull request link (`https://github.com/<owner>/<repo>/pull/<n>`) moves the pin to **Fixed** with that link; with neither, the pin stays Seen by Claude with the reply on its thread. A batch is one message with one pin id, so its reply belongs to every pin in the batch. The reply is untrusted text: the extension only ever renders it as text, and the only link it renders is a pull request link that matches that pattern.
 9. The user marks the pin **Resolved**, typically after merging, and can reopen it. Resolved is kept by the extension only; the helper's status underneath is unchanged.
 
 ```text
 Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──> Resolved
                 │
                 ├──> Approve in terminal
-                └──> Blocked (not picked up; GitHub access in build step 5)
+                └──> Blocked (not picked up)
+Seen by Claude ──> Blocked: GitHub access ──(follow-up)──> Sent ──> …
 ```
 
 ## GitHub flow
 
-- The session creates a branch, commits, pushes and opens a pull request with the user's own `gh` login and git credentials. Squashflow never sees or stores a GitHub token.
-- If the push or pull request fails because the user lacks access, the pin moves to **Blocked: GitHub access** with these options:
-  - **Log in:** run `gh auth login` and retry.
-  - **Fork and open a PR:** the session forks the repository and opens the pull request from the fork.
-  - **Copy the patch:** copy the diff to the clipboard to share another way.
-  - **Ask the owner:** copy a ready-made message describing the change for the repository owner.
+The session creates a branch, commits, pushes and opens a pull request with the user's own `gh` login and git credentials. Squashflow never sees or stores a GitHub token, and the helper runs no `git` or `gh` command for this flow: all of it is the session's work, under Claude Code's own permissions. The text contract with the session lives in `@squashflow/shared` (`github.ts`), so delivered and copied messages ask for the same thing.
+
+### The blocked line
+
+If the push or the pull request fails because the user lacks access, the message asks the session not to retry or work around it, to keep the commit on its branch, and to reply with this line, on its own, followed by a short summary of the change:
+
+```text
+SQUASHFLOW-BLOCKED [sf-<12 hex>] github-access: <one-line reason>
+```
+
+The id is the message's pin id (a batch's single id). The helper looks for the line in the reply it picked out of the transcript and moves the pin to **Blocked: GitHub access** with the reason (control characters dropped, at most 300 characters). Claude's reply is still untrusted text, so the line counts only when:
+
+- it names this message's pin id. The id is random and created when the message is previewed, after the page context was captured, so page content quoted in a reply cannot carry it; anything that knows it has read the delivered message, which is no more than the session itself could write;
+- it starts its own line, exactly: a line that is quoted (`>`), indented or prefixed does not count, and page context is JSON inside its fence, so page text never starts a line of the message;
+- it is outside fenced code blocks (`` ``` `` or `~~~`);
+- the reason is present and is not the instructions' own `<one-line reason>` placeholder.
+
+When several lines qualify, the last one wins. A blocked reply never sets the pin's pull request link, so a reply that mentions some other pull request does not look Fixed.
+
+### The four options
+
+The extension shows the session's reason and four options under a pin that is Blocked: GitHub access:
+
+- **Log in:** shows "Run `gh auth login` in a terminal, then press Retry." **Retry** sends the `retry` follow-up: push the branch again and open the pull request.
+- **Fork and open a PR:** sends the `fork` follow-up: fork with `gh repo fork --remote --remote-name squashflow-fork`, push the branch to the fork, and open the pull request from the fork against the original repository.
+- **Copy the patch:** copies the diff from the most recent reply that has one: the last fenced block marked `diff` or `patch` that reads as a unified diff, from a reply that was not cut. When no reply has one, it sends the `patch` follow-up instead, asking the session to reply with the change as one unified diff in a `diff` block and not to push; the user presses Copy the patch again once Claude replies. A reply to the patch request that reports neither a pull request nor a new block returns the pin to the block it was in.
+- **Ask the owner:** copies a ready-made message for the repository owner, built in the extension from the page URL, the pin's comment and Claude's summary (the reply that reported the block, without the blocked line or code blocks, capped at 2000 characters), saying the user lacks access and offering the patch when one is available.
+
+The patch comes from the session rather than from the helper running `git diff` in the session's folder. The session knows which branch and base the change is on, while the helper would have to guess a base (`origin/HEAD` may be missing, the folder may have moved on to other work), and running `git` there for content means trusting the repository's own configuration (diff drivers, `core.fsmonitor`). Asking the session keeps the helper's commands to the fixed discovery calls it already makes. The cost is that a patch longer than the reply cap (8000 characters) is cut, and a cut reply yields no patch; the panel then has nothing to copy, and the user can ask the session in the terminal to write the patch to a file.
+
+### Follow-ups
+
+A follow-up is fixed text per action (`buildFollowUp`): a provenance header naming the pin id (so the transcript watch recognises it), the request, and, for `retry` and `fork`, the same blocked-line instructions as the first message. Nothing from the page or the reply goes into it.
+
+1. **Preview, then send.** The panel asks the service worker (`follow-up-preview`, with the extension's own pin id and the action); the service worker finds the helper's message id for that pin and calls `POST /pins/{id}/follow-up` with `"preview": true` and the stored token. The helper answers only for a pin that is Blocked: GitHub access and no longer followed, and returns the exact message and its digest, which the panel shows in the same preview dialog as pins. Only **Send to claude@`<name>`** delivers it (`follow-up-send`, then the request with the `digest`); Cancel or Escape sends nothing.
+2. **Same session.** The helper delivers it only to the session the pin first went to, matched by pid and session id; if that session is gone, it refuses.
+3. **Following again.** Delivery writes to the inbox socket exactly as for a pin, moves the pin to **Sent** with no block, and follows the transcript again from there: Seen by Claude, then Fixed, Blocked: GitHub access again, or back to the earlier block after a patch reply.
+
+The pin mode script never sees the pairing token: as for every other helper call, the service worker makes the request and answers with the previewed message or the pin's record.
 
 ## The extension
 
@@ -216,7 +251,7 @@ The `send` request carries the extension's own ids of the pins in the message, s
 2. **Following.** While any pin is in flight (the helper's `following` flag), the service worker keeps `GET /events` open and applies each record to every pin delivered in that message; when nothing is in flight it closes the stream. Each time the stream opens, it re-reads `GET /pins/{id}` for the pins in flight, to catch up on anything published before. A Manifest V3 service worker is stopped when idle and loses its stream, so it also catches up whenever it starts, and the pin mode script asks it to (`track`) when pin mode opens and every 20 seconds while a pin on the page is in flight, which also keeps it running. A message the helper no longer knows (`404` after a restart) stops being followed, keeping the last status.
 3. **Display.** The pin mode script reads the statuses and listens for changes to them. Each sent pin's marker is coloured by status and titled with it, and its row in the panel shows the status with a small Squish in the matching mood, Claude's latest reply as plain text, the pull request link (`PR #<n>`, opening in a new tab with `noopener noreferrer`) and **Resolve** or **Reopen**. Squish in the panel header follows the page's pins: blocked when one is Blocked or Approve in terminal, working while one is Seen by Claude, waiting while one is only Sent, squashed when the rest are Fixed; Resolved pins no longer count. After an action (copy, send, a failure) it shows that action's mood for a moment first.
 
-Follow-up messages on a pin's thread are not supported yet.
+Free-form follow-up messages on a pin's thread are not supported; the only follow-ups are the [GitHub flow's](#follow-ups) fixed ones for a pin that is Blocked: GitHub access.
 
 ### Copy
 
@@ -264,7 +299,7 @@ The helper needs Claude Code **2.1.224** or later: the first release with the se
 2. Pins and page context in the browser, plus copy. (Done.)
 3. Session picker. (Done.)
 4. Claude replies and pin status. (Done.)
-5. GitHub flow.
+5. GitHub flow. (Done.)
 6. Chrome extension packaging and region screenshots.
 
 ## Open questions
