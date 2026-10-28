@@ -2,10 +2,13 @@
  * Service worker. Pin mode is injected only into the tab the user acts on, using the
  * activeTab grant from the toolbar click or keyboard shortcut; there are no host
  * permissions and no content scripts declared for any site. Every call to the local
- * helper is made from here, never from the pin mode script or the page.
+ * helper is made from here, never from the pin mode script or the page, and so are the
+ * captures of the visible tab behind region screenshots.
  */
 
 import pinModeUrl from "url:./inject/pin-mode.ts";
+import { screenshotRequestSchema } from "./capture/screenshot";
+import { captureRegion } from "./capture/tab-capture";
 import { ConnectionStore, indexedDbArea } from "./helper/connection";
 import { HelperService } from "./helper/service";
 import { SiteRepoStore } from "./helper/sites";
@@ -42,6 +45,11 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only this extension's own pin mode script; there is no externally_connectable.
   if (sender.id !== chrome.runtime.id) return false;
+  const screenshot = screenshotRequestSchema.safeParse(message);
+  if (screenshot.success) {
+    void captureRegion(sender.tab, screenshot.data).then(sendResponse);
+    return true;
+  }
   void helper.handle(message).then(sendResponse);
   return true;
 });

@@ -1,4 +1,5 @@
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -144,6 +145,46 @@ describe("delivery: POST /pins to Seen by Claude", () => {
         (value) => value === "seen",
       ),
     ).toBe("seen");
+  });
+
+  it("writes a pin's screenshot to a user-only file that the previewed message names", async () => {
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const screenshot = { type: "image/png", data: png.toString("base64"), width: 1, height: 1 };
+    const body = { ...pinsBody, pins: [{ ...pinsBody.pins[0], screenshot }] };
+    const preview = await post({ ...body, preview: true });
+    expect(preview.status).toBe(200);
+    const { pinId, digest, message } = preview.json<{
+      pinId: string;
+      digest: string;
+      message: string;
+    }>();
+    const file = join(dir.path, "screenshots", pinId, "pin-1.png");
+    const sha256 = createHash("sha256").update(png).digest("hex");
+    expect(message).toContain("<untrusted-page-screenshots>");
+    expect(message).toContain(
+      `- Pin 1, PNG 1×1 px: read the image file ${file} (SHA-256 ${sha256})`,
+    );
+    expect(message).not.toContain(screenshot.data);
+
+    // A different image is not what the user previewed.
+    const other = { ...screenshot, data: `${screenshot.data.slice(0, -4)}AAA=` };
+    const swapped = await post({
+      ...body,
+      pins: [{ ...pinsBody.pins[0], screenshot: other }],
+      pinId,
+      digest,
+    });
+    expect(swapped.status).toBe(409);
+
+    expect((await post({ ...body, pinId, digest })).status).toBe(202);
+    expect(await readFile(file)).toEqual(png);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect((await stat(join(dir.path, "screenshots", pinId))).mode & 0o777).toBe(0o700);
+    const line = JSON.parse(await inbox.received) as { message: { content: string } };
+    expect(line.message.content).toContain(file);
   });
 
   it("picks up Claude's reply and moves the pin to Fixed with the pull request link", async () => {

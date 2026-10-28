@@ -19,6 +19,8 @@ corepack pnpm test        # vitest
 corepack pnpm build
 corepack pnpm --filter @squashflow/extension exec playwright install chromium   # once
 corepack pnpm test:e2e    # Playwright, against the built extension
+corepack pnpm package     # the Chrome Web Store zip, in packages/extension/build/
+corepack pnpm check:pack  # npx squashflow from a packed helper tarball (publishes nothing)
 node packages/helper/dist/cli.js doctor
 ```
 

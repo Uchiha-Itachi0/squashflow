@@ -71,7 +71,7 @@ describe("request checks", () => {
       method: "POST",
       path: "/pins",
       headers: helper.auth({ authorization: undefined, "content-type": "application/json" }),
-      body: "x".repeat(2048),
+      body: "x".repeat(8192),
     });
     expect(reply.status).toBe(413);
   });
@@ -84,8 +84,18 @@ describe("request checks", () => {
       body: JSON.stringify({
         session: 1,
         pageUrl: "https://a.example/",
-        pins: [{ comment: "x".repeat(2048) }],
+        pins: [{ comment: "x".repeat(7000) }, { comment: "y".repeat(7000) }],
       }),
+    });
+    expect(reply.status).toBe(413);
+  });
+
+  it("keeps the smaller cap for every endpoint but POST /pins", async () => {
+    const reply = await send(port, {
+      method: "POST",
+      path: "/pair",
+      headers: helper.auth({ authorization: undefined, "content-type": "application/json" }),
+      body: "x".repeat(2048),
     });
     expect(reply.status).toBe(413);
   });

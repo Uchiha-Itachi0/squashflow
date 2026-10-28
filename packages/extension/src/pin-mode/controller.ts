@@ -2,13 +2,20 @@
  * Pin mode on the current page. While it is on, clicks on the page place pins instead
  * of reaching the page: click an element, drag an area, Shift+click several elements,
  * or switch to Text and select text. Escape closes the comment box, then exits.
+ * Each new pin gets a region screenshot of the visible tab, taken with the pin UI hidden.
  * Sent pins show their status and Claude's reply, which the service worker stores.
  */
 
-import type { DetailLevel, Rect } from "@squashflow/shared";
+import type { DetailLevel, PageContext, Rect, Screenshot } from "@squashflow/shared";
 import { capturePin, pageRect, type PinTarget } from "../capture/context";
+import {
+  pinRegion,
+  visibleRegion,
+  type ScreenshotReply,
+  type ScreenshotRequest,
+} from "../capture/screenshot";
 import { DRAG_THRESHOLD_PX, HOST_TAG } from "../constants";
-import { buildCopyText, writeClipboard } from "../copy/copy";
+import { copyPins, copyScreenshot, writeClipboard } from "../copy/copy";
 import { askWorker, type AskWorker } from "../helper/messages";
 import {
   moodFor,
@@ -46,6 +53,8 @@ export class PinMode {
   private level: DetailLevel = "standard";
   private selection: Element[] = [];
   private drag: Drag | null = null;
+  /** Set while a new pin's screenshot is being taken; further pins wait for it. */
+  private capturing = false;
   private status: { text: string; error: boolean } | null = null;
   /** A short-lived mood after an action; otherwise Squish follows the pins' statuses. */
   private flash: SquishMood | null = null;
@@ -240,17 +249,66 @@ export class PinMode {
   }
 
   private compose(target: PinTarget): void {
+    if (this.capturing) return;
+    this.capturing = true;
     const context = capturePin(target);
     this.view.showHover(null);
+    void this.screenshot(context)
+      .then((screenshot) => {
+        this.openNewPin(target, context, screenshot);
+      })
+      .finally(() => {
+        this.capturing = false;
+      });
+  }
+
+  /**
+   * A crop of the visible tab around the pin, taken by the service worker with the pin
+   * UI hidden. Pins are still saved without one when it cannot be taken.
+   */
+  private async screenshot(context: PageContext): Promise<Screenshot | undefined> {
+    const region = pinRegion(context);
+    const viewport = {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+    };
+    const visible =
+      region === null
+        ? null
+        : visibleRegion(region, { x: window.scrollX, y: window.scrollY }, viewport);
+    if (visible === null) return undefined;
+    const request: ScreenshotRequest = { type: "screenshot", region: visible, viewport };
+    const reply = await this.view.hiddenWhile(async () => {
+      try {
+        return await chrome.runtime.sendMessage<ScreenshotRequest, ScreenshotReply | undefined>(
+          request,
+        );
+      } catch {
+        return undefined;
+      }
+    });
+    return reply?.ok === true ? reply.value : undefined;
+  }
+
+  private openNewPin(
+    target: PinTarget,
+    context: PageContext,
+    screenshot: Screenshot | undefined,
+  ): void {
     this.view.openComposer({
       anchor: context.area ??
         context.rect ?? { x: 16, y: window.scrollY + 16, width: 0, height: 0 },
       heading: describeTarget(target),
       initial: "",
       editing: false,
-      onSave: (comment) => {
+      screenshot: screenshot !== undefined,
+      onSave: (comment, includeScreenshot) => {
         void this.run(async () => {
-          await this.store.add({ comment, context });
+          await this.store.add({
+            comment,
+            context,
+            screenshot: includeScreenshot ? screenshot : undefined,
+          });
           this.view.closeComposer();
           window.getSelection()?.removeAllRanges();
           await this.reload();
@@ -270,6 +328,7 @@ export class PinMode {
       heading: `Pin ${index + 1}`,
       initial: pin.comment,
       editing: true,
+      screenshot: false,
       onSave: (comment) => {
         void this.run(async () => {
           await this.store.update(id, comment);
@@ -297,10 +356,22 @@ export class PinMode {
 
   private copy(pins: readonly StoredPin[]): void {
     void this.run(async () => {
-      const text = buildCopyText({ pins, level: this.level, pageUrl: pinPageUrl(location.href) });
-      await writeClipboard(text, this.view.host.shadowRoot ?? this.view.host);
+      const result = await copyPins(
+        { pins, level: this.level, pageUrl: pinPageUrl(location.href) },
+        this.view.host.shadowRoot ?? this.view.host,
+      );
       const what = pins.length === 1 ? "1 pin" : `${pins.length} pins`;
-      this.setStatus(`Copied ${what} (${this.level}). Paste it into your Claude Code session.`);
+      this.setStatus(`Copied ${what} (${this.level}). ${copyAdvice(result)}`);
+      this.setMood("squashed");
+    });
+  }
+
+  private copyShot(id: string): void {
+    const screenshot = this.pins.find((pin) => pin.id === id)?.screenshot;
+    if (screenshot === undefined) return;
+    void this.run(async () => {
+      await copyScreenshot(screenshot);
+      this.setStatus("Copied the screenshot. Paste it into your Claude Code session.");
       this.setMood("squashed");
     });
   }
@@ -381,6 +452,7 @@ export class PinMode {
         id: pin.id,
         number: index + 1,
         comment: pin.comment,
+        hasScreenshot: pin.screenshot !== undefined,
         status: this.statusOf(pin.id),
       })),
       mode: this.mode,
@@ -413,6 +485,7 @@ export class PinMode {
       canSend: this.send.target !== null,
       onCopy: (id) => this.copy(this.pins.filter((pin) => pin.id === id)),
       onCopyAll: () => this.copy(this.pins),
+      onCopyScreenshot: (id) => this.copyShot(id),
       onSend: (id) => this.sendPins(this.pins.filter((pin) => pin.id === id)),
       onSendAll: () => this.sendPins(this.pins),
       onEdit: (id) => this.edit(id),
@@ -495,6 +568,22 @@ function safeQuery(selector: string): Element | null {
   } catch {
     return null;
   }
+}
+
+function copyAdvice({
+  imageAttached,
+  screenshots,
+}: {
+  imageAttached: boolean;
+  screenshots: number;
+}): string {
+  if (imageAttached) {
+    return "Paste the text into your Claude Code session, then paste the screenshot (Ctrl+V).";
+  }
+  if (screenshots > 0) {
+    return "Paste it into your Claude Code session; the text says how to add the screenshots.";
+  }
+  return "Paste it into your Claude Code session.";
 }
 
 function describeTarget(target: PinTarget): string {

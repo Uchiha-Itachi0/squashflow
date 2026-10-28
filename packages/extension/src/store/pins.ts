@@ -8,7 +8,9 @@ import {
   MAX_COMMENT_CHARS,
   pageContextSchema,
   pageUrlSchema,
+  screenshotSchema,
   type PageContext,
+  type Screenshot,
 } from "@squashflow/shared";
 // Namespace import: Parcel (the extension bundler) mis-bundles zod's `z` re-export.
 import * as z from "zod";
@@ -21,6 +23,8 @@ export const storedPinSchema = z.strictObject({
   id: z.string().regex(PIN_ID),
   comment: z.string().trim().min(1).max(MAX_COMMENT_CHARS),
   context: pageContextSchema,
+  /** A crop of the visible tab around the pin, when one could be taken. */
+  screenshot: screenshotSchema.optional(),
   pageUrl: pageUrlSchema,
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
@@ -38,6 +42,7 @@ export interface StorageAreaLike {
 export interface NewPin {
   comment: string;
   context: PageContext;
+  screenshot?: Screenshot | undefined;
 }
 
 /** The page URL a pin records, without its fragment. */
@@ -90,6 +95,7 @@ export class PinStore {
       id: newPinId(),
       comment: pin.comment,
       context: pin.context,
+      ...(pin.screenshot === undefined ? {} : { screenshot: pin.screenshot }),
       pageUrl: this.pageUrl,
       createdAt: time,
       updatedAt: time,

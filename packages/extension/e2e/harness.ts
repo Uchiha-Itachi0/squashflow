@@ -3,8 +3,8 @@
  *
  * Playwright cannot click the toolbar button, which is what grants activeTab. The
  * harness stands in for that click: it loads a copy of the build with a host permission
- * for `localhost` only, and injects the same built pin-mode script the service worker
- * injects. The fixture is served as `localhost`, so calls to the helper on 127.0.0.1
+ * for every site (`captureVisibleTab`, behind region screenshots, accepts only activeTab or
+ * `<all_urls>`), and injects the same built pin-mode script the service worker injects. The fixture is served as `localhost`, so calls to the helper on 127.0.0.1
  * are cross-origin and go through CORS, as they do for the real extension.
  */
 
@@ -19,7 +19,9 @@ import { chromium } from "@playwright/test";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const BUILD = join(here, "..", "build", "chrome-mv3-prod");
-const FIXTURE = join(here, "fixture", "index.html");
+const FIXTURES = join(here, "fixture");
+/** Fixture pages by path; anything else gets the test fixture. */
+const PAGES: Record<string, string> = { "/store": "store.html" };
 
 export interface ExtensionHarness {
   context: BrowserContext;
@@ -31,10 +33,12 @@ export interface ExtensionHarness {
 }
 
 export async function launchExtension(): Promise<ExtensionHarness> {
-  const html = await readFile(FIXTURE);
-  const server: Server = createServer((_request, response) => {
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(html);
+  const server: Server = createServer((request, response) => {
+    const page = PAGES[(request.url ?? "/").split("?")[0] ?? "/"] ?? "index.html";
+    void readFile(join(FIXTURES, page)).then((html) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(html);
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://localhost:${(server.address() as AddressInfo).port}`;
@@ -43,10 +47,7 @@ export async function launchExtension(): Promise<ExtensionHarness> {
   await cp(BUILD, extensionDir, { recursive: true });
   const manifestPath = join(extensionDir, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
-  await writeFile(
-    manifestPath,
-    JSON.stringify({ ...manifest, host_permissions: ["http://localhost/*"] }),
-  );
+  await writeFile(manifestPath, JSON.stringify({ ...manifest, host_permissions: ["<all_urls>"] }));
   const pinModeFile = (await readdir(extensionDir)).find((name) => /^pin-mode\..*\.js$/.test(name));
   if (pinModeFile === undefined) throw new Error("Build the extension first: pnpm build");
   const background = await readFile(join(extensionDir, "static", "background", "index.js"), "utf8");

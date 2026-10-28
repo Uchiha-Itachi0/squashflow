@@ -38,6 +38,8 @@ export interface PanelPin {
   id: string;
   number: number;
   comment: string;
+  /** Whether the pin has a region screenshot. */
+  hasScreenshot: boolean;
   status: PinStatusView | null;
 }
 
@@ -62,6 +64,7 @@ export interface PanelProps {
   canSend: boolean;
   onCopy: (id: string) => void;
   onCopyAll: () => void;
+  onCopyScreenshot: (id: string) => void;
   onSend: (id: string) => void;
   onSendAll: () => void;
   onEdit: (id: string) => void;
@@ -76,7 +79,10 @@ export interface ComposerProps {
   heading: string;
   initial: string;
   editing: boolean;
-  onSave: (comment: string) => void;
+  /** Offer to keep the region screenshot taken for a new pin (ticked by default). */
+  screenshot: boolean;
+  /** `includeScreenshot` is false when the user unticked it, or none was offered. */
+  onSave: (comment: string, includeScreenshot: boolean) => void;
   onCancel: () => void;
   onDelete: () => void;
 }
@@ -90,7 +96,7 @@ const LEVEL_LABELS: Record<DetailLevel, string> = {
   compact: "Compact",
   standard: "Standard",
   detailed: "Detailed",
-  forensic: "Forensic (no screenshots yet)",
+  forensic: "Forensic (with screenshots)",
 };
 const COMPOSER_WIDTH = 260;
 const COMPOSER_GAP = 8;
@@ -133,6 +139,21 @@ export class PinView {
       });
     }
     document.documentElement.append(this.host);
+  }
+
+  /**
+   * Run `action` with the pin UI hidden and painted out, so a capture of the visible tab
+   * shows only the page.
+   */
+  async hiddenWhile<T>(action: () => Promise<T>): Promise<T> {
+    const parts = [this.overlay, this.panelSlot, this.previewSlot];
+    for (const part of parts) part.style.visibility = "hidden";
+    try {
+      await nextPaint();
+      return await action();
+    } finally {
+      for (const part of parts) part.style.visibility = "";
+    }
   }
 
   /** Whether an event started inside the pin UI. */
@@ -202,8 +223,11 @@ export class PinView {
       },
     });
     field.value = props.initial;
+    const keep = h("input", { attrs: { type: "checkbox" } });
+    keep.checked = true;
     const save = (): void => {
-      if (field.value.trim() !== "") props.onSave(field.value.trim());
+      if (field.value.trim() !== "")
+        props.onSave(field.value.trim(), props.screenshot && keep.checked);
     };
     field.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -214,6 +238,12 @@ export class PinView {
     const composer = h("div", { className: "composer", attrs: { role: "dialog" } }, [
       h("div", { className: "what", text: props.heading }),
       field,
+      props.screenshot &&
+        h(
+          "label",
+          { className: "keep-shot", title: "A screenshot of this region, as it shows on screen" },
+          [keep, "Include screenshot"],
+        ),
       h("div", { className: "row" }, [
         props.editing &&
           h("button", { className: "danger", text: "Delete", on: { click: props.onDelete } }),
@@ -315,7 +345,6 @@ function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
     h("span", { className: "badge", text: String(pin.number) }),
     h("div", { className: "body" }, [
       h("span", { className: "comment", text: pin.comment, title: pin.comment }),
-      status !== null && pinStatus(pin, status, props),
     ]),
     h("span", { className: "actions" }, [
       props.canSend &&
@@ -341,6 +370,20 @@ function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
         on: { click: () => props.onDelete(pin.id) },
       }),
     ]),
+    (pin.hasScreenshot || status !== null) &&
+      h("div", { className: "details" }, [
+        pin.hasScreenshot &&
+          h("div", { className: "shot" }, [
+            h("span", { className: "shot-tag", text: "Screenshot" }),
+            h("button", {
+              className: "link",
+              text: "Copy screenshot",
+              attrs: { "aria-label": `Copy screenshot of pin ${pin.number}` },
+              on: { click: () => props.onCopyScreenshot(pin.id) },
+            }),
+          ]),
+        status !== null && pinStatus(pin, status, props),
+      ]),
   ]);
 }
 
@@ -396,6 +439,13 @@ function pullRequestLabel(url: string): string {
 
 function readLevel(value: string): DetailLevel {
   return DETAIL_LEVELS.find((level) => level === value) ?? "standard";
+}
+
+/** Resolve after the browser has painted the current state of the page twice. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
 }
 
 function showBox(element: HTMLElement, box: Rect | null): void {

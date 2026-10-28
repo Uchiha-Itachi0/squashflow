@@ -73,11 +73,13 @@ export async function startTestHelper(
     socketDir: join(dir, "socks"),
     claudeConfigDir: join(dir, "claude"),
     senderSocketPath: join(dir, "sender.sock"),
+    screenshotDir: join(dir, "screenshots"),
     pollMs: 20,
   });
   const context: HelperContext = {
     port: 0,
     maxBodyBytes: 1024,
+    maxPinsBodyBytes: 4096,
     auth: paired
       ? { tokenHash: hashToken(TOKEN), origin: EXTENSION_ORIGIN }
       : { tokenHash: null, origin: null },

@@ -1,15 +1,21 @@
 /**
  * The message for a session. Fixed four-part structure:
- * provenance header, the user's comment(s), page context fenced as untrusted data,
- * and the requested outcome (the GitHub flow, see github.ts). Building is deterministic so a preview can be verified.
+ * provenance header, the user's comment(s), page context fenced as untrusted data
+ * (with any region screenshots, named and fenced the same way), and the requested outcome (the GitHub flow, see github.ts). Building is deterministic so a preview can be verified.
  *
  * The helper builds it for delivery; the extension builds it for copy-and-paste mode,
  * so both paths share the same structure, fencing and escaping.
  */
 
-import { contextForLevel, includesPageUrl, type DetailLevel } from "./detail.js";
+import {
+  contextForLevel,
+  includesPageUrl,
+  includesScreenshots,
+  type DetailLevel,
+} from "./detail.js";
 import { requestedOutcome } from "./github.js";
 import type { PinInput } from "./schemas.js";
+import { screenshotSection, type ScreenshotReference } from "./screenshot.js";
 
 export const CONTEXT_OPEN = "<untrusted-page-context>";
 export const CONTEXT_CLOSE = "</untrusted-page-context>";
@@ -28,9 +34,21 @@ export interface MessageInput {
   pins: readonly PinInput[];
   /** Copy detail level. Omitted: the context is used exactly as given. */
   detail?: DetailLevel | undefined;
+  /**
+   * Where the session finds each pin's region screenshot. The images themselves never go
+   * into the message: the helper writes them to files, and copied text says how to get them.
+   */
+  screenshots?: readonly ScreenshotReference[] | undefined;
 }
 
-export function buildMessage({ pinId, source, pageUrl, pins, detail }: MessageInput): string {
+export function buildMessage({
+  pinId,
+  source,
+  pageUrl,
+  pins,
+  detail,
+  screenshots = [],
+}: MessageInput): string {
   const plural = pins.length > 1;
   const shownUrl = detail === undefined || includesPageUrl(detail) ? pageUrl : undefined;
   const header = provenanceHeader(pinId, source, shownUrl);
@@ -42,6 +60,7 @@ export function buildMessage({ pinId, source, pageUrl, pins, detail }: MessageIn
             ? pin
             : { ...pin, context: contextForLevel(pin.context, detail) },
         );
+  const shownScreenshots = detail === undefined || includesScreenshots(detail) ? screenshots : [];
 
   const comments = plural
     ? pins.map((pin, index) => `${index + 1}. ${neutraliseTags(pin.comment)}`).join("\n\n")
@@ -52,6 +71,7 @@ export function buildMessage({ pinId, source, pageUrl, pins, detail }: MessageIn
     plural ? `The user's comments (${pins.length} pins):` : "The user's comment:",
     comments,
     contextSection(leveled),
+    ...(shownScreenshots.length === 0 ? [] : [screenshotSection(shownScreenshots)]),
     requestedOutcome(pinId, plural),
   ].join("\n\n");
 }
@@ -105,5 +125,8 @@ export function escapeForFence(json: string): string {
 
 /** Stop a comment from opening or closing the wrapper or the context fence. */
 export function neutraliseTags(text: string): string {
-  return text.replace(/<(\/?)(cross-session-message|untrusted-page-context)/gi, "‹$1$2");
+  return text.replace(
+    /<(\/?)(cross-session-message|untrusted-page-context|untrusted-page-screenshots)/gi,
+    "‹$1$2",
+  );
 }

@@ -1,6 +1,6 @@
 /**
  * Copy detail levels. Each level keeps a subset of the captured page context;
- * forensic keeps everything (region screenshots are not captured yet).
+ * forensic keeps everything, and is the only level that includes region screenshots.
  */
 
 import type { ElementContext, PageContext } from "./schemas.js";
@@ -27,6 +27,11 @@ export const KEY_ATTRIBUTES: readonly string[] = [
   "data-test",
   "data-cy",
 ];
+
+/** Whether a level includes region screenshots. */
+export function includesScreenshots(level: DetailLevel): boolean {
+  return level === "forensic";
+}
 
 /** Whether a level includes the page URL in the message header. */
 export function includesPageUrl(level: DetailLevel): boolean {
