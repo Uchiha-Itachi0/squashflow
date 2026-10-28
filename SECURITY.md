@@ -2,7 +2,7 @@
 
 Squashflow connects a browser extension to a local process that can deliver messages into a coding agent with access to your source code and your GitHub login. That makes security a design requirement, not an add-on. This document describes how to report a vulnerability and the threat model the project is built against.
 
-Squashflow is in early development and nothing is released yet. The threat model below describes the **planned design**; it will be updated as the code lands.
+Squashflow is in early development and nothing is released yet. The local helper is implemented, so its mitigations below (loopback binding, pairing, request checks, message fencing, socket checks) describe what it does today; [docs/architecture.md](docs/architecture.md) has the exact values. Mitigations that belong to the extension are still the **planned design**, and this document is updated as that code lands.
 
 ## Supported versions
 
@@ -93,12 +93,12 @@ Planned mitigations:
 
 ### Threat: supply-chain compromise
 
-- **Lockfile.** Once code lands, dependencies will be installed from a committed lockfile so builds are reproducible.
+- **Lockfile.** Dependencies are installed from the committed `pnpm-lock.yaml` (`--frozen-lockfile` in CI) so builds are reproducible.
 - **Pinned CI actions.** Every third-party GitHub Action is pinned to a full commit SHA, with the version recorded in a comment.
 - **Least-privilege CI.** Workflows declare empty top-level permissions and grant only what each job needs. The default Actions token is read-only.
-- **Automated updates.** Dependabot keeps pinned actions (and, once they exist, npm dependencies) up to date, and Dependabot security fixes are enabled.
+- **Automated updates.** Dependabot keeps pinned actions and npm dependencies up to date, and Dependabot security fixes are enabled.
 - **Repository protections.** Secret scanning with push protection is on, and `main` is protected: pull requests are required, force-pushes and deletion are blocked, and the rules apply to administrators too.
-- **Code scanning.** CodeQL analyses JavaScript and TypeScript code once there is code to analyse.
+- **Code scanning.** CodeQL analyses the JavaScript and TypeScript code.
 
 ### Out of scope
 

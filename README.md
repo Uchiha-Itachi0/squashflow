@@ -4,8 +4,8 @@ Pin a comment on any website, and your own Claude Code session fixes it and open
 
 Squashflow lets you hover over any live or local website and pin a comment on an element, a piece of text, a dragged area, or several elements at once. The comment, along with the page context Claude needs, is delivered to the Claude Code session you already have running in your terminal. That session fixes the code, pushes a branch and opens a pull request with your own GitHub login, then replies on the pin. There is no Squashflow server in the middle: everything except GitHub runs on your own machine.
 
-> **Status: early development, not usable yet.**
-> Nothing described here works today. This README describes the planned design so contributors and early users can see where the project is going. Commands such as `npx squashflow` are shown as they are planned to work; they do not exist yet. See the [roadmap](#roadmap) for progress.
+> **Status: early development.**
+> The local helper (build step 1) works: it lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension, dev overlay, replies and GitHub flow are not built yet, so most of this README still describes the planned design. The helper is not published to npm yet; see [Try the helper](#try-the-helper) to run it from a clone. See the [roadmap](#roadmap) for progress.
 
 ## Contents
 
@@ -17,6 +17,7 @@ Squashflow lets you hover over any live or local website and pin a comment on an
 - [Security model](#security-model)
 - [Privacy](#privacy)
 - [Requirements](#requirements)
+- [Try the helper](#try-the-helper)
 - [Roadmap](#roadmap)
 - [Comparison and credits](#comparison-and-credits)
 - [Contributing](#contributing)
@@ -61,14 +62,14 @@ How the helper finds the right session:
 2. For each session folder it runs `git remote get-url origin` to learn which GitHub repository that session is working in.
 3. When you pin a comment on a page, the extension shows the sessions that match, and you choose one (or Squashflow picks the only match).
 
-More depth, including the planned helper endpoints, pairing, and delivery confirmation, is in [docs/architecture.md](docs/architecture.md).
+More depth, including the helper endpoints, pairing, and delivery confirmation, is in [docs/architecture.md](docs/architecture.md).
 
 ## User flow
 
 The planned flow from first-time setup to a merged pull request:
 
 1. **Install the extension** in Chrome.
-2. **Start the helper** in a terminal: `npx squashflow` (planned). It prints a short pairing code.
+2. **Start the helper** in a terminal: `npx squashflow` (planned; for now, see [Try the helper](#try-the-helper)). It prints a short pairing code.
 3. **Pair once.** Enter the code in the extension. From then on the helper accepts requests only from this paired browser.
 4. **Open Claude Code** in your project folder as you normally would. The helper sees the session and matches it to the project's GitHub repository.
 5. **Pin a comment.** Hover over the page, click an element (or select text, drag an area, or pick several elements) and write what you want changed.
@@ -130,19 +131,50 @@ Beyond that, the only thing that leaves your machine is what your Claude Code se
 
 ## Requirements
 
-Planned requirements (subject to change before the first release):
+Requirements (subject to change before the first release):
 
 - **Google Chrome** (or a Chromium-based browser that supports Chrome extensions)
-- **Node.js** (current LTS) for `npx squashflow`
-- **Claude Code**, minimum version to be decided
+- **Node.js** 22.12 or later for the helper (current LTS recommended)
+- **Claude Code** 2.1.224 or later, macOS or Linux (`squashflow doctor` checks this)
 - **GitHub CLI** (`gh`), logged in with `gh auth login`
 - **git**, with your project cloned locally from GitHub
 
+## Try the helper
+
+The helper can already deliver a pin into a running Claude Code session from the command line, without the extension. It is not on npm yet, so build it from a clone (development needs Node.js 22.12 or later and pnpm through Corepack):
+
+```sh
+git clone https://github.com/Uchiha-Itachi0/squashflow.git
+cd squashflow
+corepack pnpm install
+corepack pnpm build
+alias squashflow="node $PWD/packages/helper/dist/cli.js"
+```
+
+Then, with a Claude Code session open in one of your projects:
+
+```sh
+squashflow doctor                 # checks Node, Claude Code version, git and the session inbox
+squashflow sessions               # lists running sessions with their folder, status and GitHub repository
+squashflow send --session <name or pid> "Make the Buy button on /pricing blue"
+```
+
+`send` prints the exact message that will be delivered and asks `Send this message? [y/N]`. After you confirm, it delivers the message to that session and waits until the session's transcript shows it arrived:
+
+```text
+squish → claude@my-app  pin 1  Sent
+(｡>ᴗ<｡) squashed! pin 1 seen by Claude
+```
+
+If the session runs in bypass-permissions mode, Claude Code holds the message and the helper prints *approve it in the terminal*; approve it in that session's terminal and the pin moves on to *seen by Claude*. The message arrives as a request from another session, never as your own typing, and Claude Code's permissions still apply.
+
+`squashflow` on its own starts the helper's local server on `http://127.0.0.1:47821` and prints a pairing code for the (not yet built) extension. Add `--no-color`, or set `NO_COLOR`, for plain output.
+
 ## Roadmap
 
-The planned build order. Nothing is built yet.
+The planned build order.
 
-- [ ] 1. Helper: list sessions, match repositories, send a pin, confirm delivery
+- [x] 1. Helper: list sessions, match repositories, send a pin, confirm delivery
 - [ ] 2. Overlay with pins and page context, plus copy-to-clipboard
 - [ ] 3. Session picker
 - [ ] 4. Claude replies and pin status

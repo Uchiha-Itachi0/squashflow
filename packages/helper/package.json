@@ -1,0 +1,34 @@
+{
+  "name": "squashflow",
+  "version": "0.1.0",
+  "description": "Local helper for Squashflow: delivers browser pins into your running Claude Code session.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "squashflow": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "vitest": "5.0.5"
+  }
+}
