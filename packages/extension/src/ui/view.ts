@@ -7,6 +7,14 @@
 import { DETAIL_LEVELS, type DetailLevel, type Rect } from "@squashflow/shared";
 import { HOST_TAG } from "../constants";
 import { h, placeBox } from "./dom";
+import {
+  pairingFields,
+  previewDialog,
+  sendSection,
+  type PairingFields,
+  type PreviewProps,
+  type SendSectionProps,
+} from "./send-view";
 import { squishSvg, type SquishMood } from "./squish";
 import { PIN_UI_CSS } from "./styles";
 
@@ -26,8 +34,14 @@ export interface PanelProps {
   mood: SquishMood;
   onMode: (mode: PinModeKind) => void;
   onLevel: (level: DetailLevel) => void;
+  /** The Claude Code section, without the pairing inputs the view keeps itself. */
+  send: Omit<SendSectionProps, "fields">;
+  /** Whether a session is chosen, so pins can be sent. */
+  canSend: boolean;
   onCopy: (id: string) => void;
   onCopyAll: () => void;
+  onSend: (id: string) => void;
+  onSendAll: () => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -65,6 +79,8 @@ export class PinView {
   private readonly selectionLayer: HTMLElement;
   private readonly markerLayer: HTMLElement;
   private readonly panelSlot: HTMLElement;
+  private readonly previewSlot: HTMLElement;
+  private readonly pairing: PairingFields = pairingFields();
   private composer: HTMLElement | null = null;
 
   constructor() {
@@ -82,7 +98,8 @@ export class PinView {
       this.markerLayer,
     ]);
     this.panelSlot = h("div");
-    shadow.append(h("style", { text: PIN_UI_CSS }), this.overlay, this.panelSlot);
+    this.previewSlot = h("div");
+    shadow.append(h("style", { text: PIN_UI_CSS }), this.overlay, this.panelSlot, this.previewSlot);
     this.showHover(null);
     this.showArea(null);
     // Keys typed in the pin UI must not trigger the page's own shortcuts.
@@ -142,7 +159,12 @@ export class PinView {
   }
 
   renderPanel(props: PanelProps): void {
-    this.panelSlot.replaceChildren(panel(props));
+    this.panelSlot.replaceChildren(panel(props, this.pairing));
+  }
+
+  /** The message preview dialog, or nothing. */
+  renderPreview(props: PreviewProps | null): void {
+    this.previewSlot.replaceChildren(...(props === null ? [] : [previewDialog(props)]));
   }
 
   openComposer(props: ComposerProps): void {
@@ -193,7 +215,7 @@ export class PinView {
   }
 }
 
-function panel(props: PanelProps): HTMLElement {
+function panel(props: PanelProps, fields: PairingFields): HTMLElement {
   const squish = h("div", { className: "squish" });
   squish.innerHTML = squishSvg(props.mood);
   const modeButton = (mode: PinModeKind, label: string): HTMLButtonElement =>
@@ -242,14 +264,22 @@ function panel(props: PanelProps): HTMLElement {
       text: props.status?.text ?? "",
       attrs: { role: "status" },
     }),
+    sendSection({ ...props.send, fields }),
     h("footer", {}, [
       level,
       h("button", {
-        className: "primary",
+        className: props.canSend ? "" : "primary",
         text: "Copy all",
         attrs: props.pins.length === 0 ? { disabled: "" } : {},
         on: { click: props.onCopyAll },
       }),
+      props.canSend &&
+        h("button", {
+          className: "primary",
+          text: "Send all",
+          attrs: props.pins.length === 0 || props.send.state.busy ? { disabled: "" } : {},
+          on: { click: props.onSendAll },
+        }),
     ]),
   ]);
 }
@@ -259,6 +289,12 @@ function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
     h("span", { className: "badge", text: String(pin.number) }),
     h("span", { className: "comment", text: pin.comment, title: pin.comment }),
     h("span", { className: "actions" }, [
+      props.canSend &&
+        h("button", {
+          text: "Send",
+          attrs: { "aria-label": `Send pin ${pin.number}` },
+          on: { click: () => props.onSend(pin.id) },
+        }),
       h("button", {
         text: "Copy",
         attrs: { "aria-label": `Copy pin ${pin.number}` },

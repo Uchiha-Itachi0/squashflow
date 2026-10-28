@@ -5,7 +5,7 @@ Pin a comment on any website, and your own Claude Code session fixes it and open
 Squashflow lets you hover over any live or local website and pin a comment on an element, a piece of text, a dragged area, or several elements at once. The comment, along with the page context Claude needs, is delivered to the Claude Code session you already have running in your terminal. That session fixes the code, pushes a branch and opens a pull request with your own GitHub login, then replies on the pin. There is no Squashflow server in the middle: everything except GitHub runs on your own machine.
 
 > **Status: early development.**
-> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension (build step 2) places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level; it does not talk to the helper yet, so pins reach a session by copy and paste. The session picker, replies, GitHub flow and dev overlay are not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
+> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level (build step 2), and pairs with the helper, lets you pick a session, previews the exact message and sends it (build step 3). Per-pin status in the browser, replies, the GitHub flow and the dev overlay are not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
 
 ## Contents
 
@@ -169,7 +169,7 @@ squish → claude@my-app  pin 1  Sent
 
 If the session runs in bypass-permissions mode, Claude Code holds the message and the helper prints *approve it in the terminal*; approve it in that session's terminal and the pin moves on to *seen by Claude*. The message arrives as a request from another session, never as your own typing, and Claude Code's permissions still apply.
 
-`squashflow` on its own starts the helper's local server on `http://127.0.0.1:47821` and prints a pairing code for the extension (pairing arrives with the session picker, build step 3). Add `--no-color`, or set `NO_COLOR`, for plain output.
+`squashflow` on its own starts the helper's local server on `http://127.0.0.1:47821` and prints a pairing code for the extension (see [Try the extension](#try-the-extension)). Add `--no-color`, or set `NO_COLOR`, for plain output.
 
 ## Try the extension
 
@@ -191,15 +191,24 @@ On any `http` or `https` page, click the Squashflow button or press **Alt+Shift+
 
 Each pin gets a numbered marker and a comment box. The panel lists the page's pins, where you can edit, delete or copy them. Choose a detail level (compact, standard, detailed, or forensic, which has no screenshots yet) and press **Copy** on one pin or **Copy all**, then paste the text into your Claude Code session. Press **Escape** to close the comment box, and again to leave pin mode. Pins are kept in the extension's local storage, per page, until you delete them.
 
+To send pins straight to a session instead of pasting them:
+
+1. Start the helper with `squashflow` (see [Try the helper](#try-the-helper)). It prints a pairing code.
+2. In the panel's **Send to Claude Code** section, press **Pair with helper**, enter the code (and the port, if you started the helper with `--port`) and press **Pair**. You pair once; **Re-pair** and **Forget** are there if you need them.
+3. Pick the session to send to. Each one shows its name, whether it is idle or busy, its repository and its folder. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since.
+4. Press **Send** on a pin, or **Send all**. The panel shows the exact message the session will receive; press **Send to claude@`<name>`** to deliver it, or **Cancel**. The panel then says it was sent, or why not in plain words (for example, the preview expired and needs previewing again).
+
+If the helper is not running, you have not paired, or no session is open on the site's repository, the panel says so and Copy still works. Live status after *Sent* (*Seen by Claude*, *Approve in terminal*) and Claude's replies arrive in build step 4; for now the helper's terminal shows them.
+
 The extension asks for as little as it can:
 
 | Permission | Why |
 | --- | --- |
 | `activeTab` | Lets the extension act on the current tab only, and only after you click its button or press its shortcut. There are no host permissions: it cannot read or change any site on its own. |
 | `scripting` | Injects the pin mode script into that tab when you turn pin mode on. Nothing is injected into pages you have not asked for. |
-| `storage` | Keeps your pins in the extension's local storage, which web pages cannot read. |
+| `storage` | Keeps your pins, and the sites whose repository you asked it to remember, in the extension's local storage, which web pages cannot read. |
 
-There is no remote code: everything the extension runs ships inside it. It never captures the values of form fields (including password and hidden fields), and every captured field is size-capped; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The pin UI runs inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool.
+There is no remote code: everything the extension runs ships inside it. Talking to the helper needs no extra permission: only the extension's background service worker calls it, on `127.0.0.1`, and the helper answers only the paired extension's origin. The pairing token stays in that service worker's own storage, out of reach of web pages and of the script running in the page. It never captures the values of form fields (including password and hidden fields), and every captured field is size-capped; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The pin UI runs inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool.
 
 ## Roadmap
 
@@ -207,7 +216,7 @@ The planned build order.
 
 - [x] 1. Helper: list sessions, match repositories, send a pin, confirm delivery
 - [x] 2. Pins and page context in the browser, plus copy-to-clipboard
-- [ ] 3. Session picker
+- [x] 3. Session picker
 - [ ] 4. Claude replies and pin status
 - [ ] 5. GitHub flow (branch, pull request, blocked-access options)
 - [ ] 6. Chrome extension packaging and region screenshots

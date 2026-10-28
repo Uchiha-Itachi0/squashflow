@@ -1,6 +1,7 @@
 /** The helper's HTTP server: 127.0.0.1 only, paired extension only. */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { PublicSession } from "@squashflow/shared";
 import { HELPER_VERSION, LOOPBACK_HOST } from "../constants.js";
 import { DraftError, type DeliveryService, type DraftErrorReason } from "../delivery.js";
 import { generateToken, hashToken, type PairingCodes } from "../pairing.js";
@@ -289,7 +290,7 @@ function events(context: HelperContext, response: ServerResponse): void {
   });
 }
 
-export function publicSession(session: SessionInfo): Record<string, unknown> {
+export function publicSession(session: SessionInfo): PublicSession {
   return {
     pid: session.pid,
     name: session.name,
