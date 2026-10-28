@@ -6,7 +6,6 @@ import { DeliveryService } from "./delivery.js";
 import { pruneScreenshots } from "./screenshots.js";
 import { defaultStateDir } from "./state.js";
 import { inboxSocketDir, openSenderSocket, type SenderSocket } from "./socket.js";
-import { claudeConfigDir } from "./transcript.js";
 
 export interface DeliveryRuntime {
   delivery: DeliveryService;
@@ -33,7 +32,6 @@ export async function openDeliveryRuntime(): Promise<DeliveryRuntime> {
   const sender = await openSenderSocket(senderSocketDir());
   const delivery = new DeliveryService({
     socketDir: inboxSocketDir(),
-    claudeConfigDir: claudeConfigDir(),
     senderSocketPath: sender.path,
     screenshotDir: screenshots,
   });

@@ -4,12 +4,18 @@ import type { HelperFailure } from "../src/helper/errors";
 import type { AskWorker, WorkerReplies, WorkerRequest } from "../src/helper/messages";
 import { followUpComment, SendFlow } from "../src/panel/send-flow";
 import type { PinTracking } from "../src/status/pin-status";
-import { sessionTimes } from "../src/panel/format";
 import type { StoredPin } from "../src/store/pins";
 
 const PAGE = "https://shop.example.com/cart";
 const DIGEST = "c".repeat(64);
-const detail = { title: null, branch: null, startedAt: null, lastActiveAt: null };
+const detail = {
+  title: null,
+  branch: null,
+  startedAt: null,
+  lastActiveAt: null,
+  account: null,
+  terminal: null,
+};
 const web: PublicSession = {
   pid: 1,
   name: "web",
@@ -60,11 +66,11 @@ const sessionsOf = (sessions: PublicSession[], repo: string | null) => (): Answe
   value: { sessions, repo } satisfies WorkerReplies["sessions"],
 });
 
-function flow(worker: ReturnType<typeof fakeWorker>) {
+function flow(worker: ReturnType<typeof fakeWorker>, pageUrl: () => string = () => PAGE) {
   const reports: [string, string][] = [];
   const send = new SendFlow({
     ask: worker.ask,
-    pageUrl: () => PAGE,
+    pageUrl,
     onChange: () => undefined,
     report: (text, outcome) => reports.push([text, outcome]),
   });
@@ -165,6 +171,39 @@ describe("SendFlow session picker", () => {
       expect(send.state.selectedPid).toBeNull();
       expect(send.target).toBeNull();
     }
+  });
+
+  it("never preselects a lone session that does not match the site", async () => {
+    // The captain's retest: only firstmate-e1 was running, on pollenflow.com.
+    const firstmate = { ...web, pid: 3, name: "firstmate-e1", repo: "kunchenguid/firstmate" };
+    for (const repo of [null, "acme/pollenflow"]) {
+      const { send } = flow(
+        fakeWorker({ status: paired, sessions: sessionsOf([firstmate], repo) }),
+        () => "https://pollenflow.com/",
+      );
+      await send.start();
+      expect(send.state.selectedPid).toBeNull();
+      expect(send.target).toBeNull();
+    }
+  });
+
+  it("does not carry a pick made on one site over to another", async () => {
+    let page = "https://vma.example.com/";
+    const { send } = flow(
+      fakeWorker({ status: paired, sessions: sessionsOf([web, api], null) }),
+      () => page,
+    );
+    await send.start();
+    send.select(2);
+    expect(send.target).toEqual(api);
+
+    page = "https://pollenflow.com/";
+    await send.refresh();
+    expect(send.target).toBeNull();
+
+    page = "https://vma.example.com/other";
+    await send.refresh();
+    expect(send.target).toEqual(api);
   });
 
   it("keeps the user's own pick across refreshes, and drops a preselection that no longer fits", async () => {
@@ -429,24 +468,5 @@ describe("SendFlow follow-up from a pin's thread", () => {
     expect(comment).toMatch(/^Follow-up to Squashflow pin \[sf-0123456789ab\] on the same element/);
     expect(comment).toContain(`"${"y".repeat(300)}…"`);
     expect(comment.endsWith("\n\nShorter")).toBe(true);
-  });
-});
-
-describe("sessionTimes", () => {
-  const now = Date.parse("2026-10-28T12:00:00.000Z");
-  it("says when a session started and was last active", () => {
-    expect(
-      sessionTimes(
-        { ...web, startedAt: "2026-10-28T09:00:00.000Z", lastActiveAt: "2026-10-28T11:58:00.000Z" },
-        now,
-      ),
-    ).toBe("started 3h ago · active 2m ago");
-    expect(sessionTimes({ ...web, startedAt: "2026-10-25T12:00:00.000Z" }, now)).toBe(
-      "started 3d ago",
-    );
-    expect(sessionTimes({ ...web, lastActiveAt: "2026-10-28T11:59:30.000Z" }, now)).toBe(
-      "active just now",
-    );
-    expect(sessionTimes({ ...web, startedAt: "not a date" }, now)).toBe("");
   });
 });

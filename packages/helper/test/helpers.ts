@@ -60,6 +60,9 @@ export function fakeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
     branch: null,
     startedAt: null,
     lastActiveAt: null,
+    configDir: "/home/demo/.claude",
+    account: null,
+    terminal: null,
     ...overrides,
   };
 }

@@ -559,8 +559,26 @@ a {
   gap: 8px;
   flex-wrap: wrap;
 }
+.ses .name {
+  justify-content: space-between;
+  flex-wrap: nowrap;
+}
 .ses .name b {
   font-size: 15px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ses .term {
+  font: 12px var(--mono);
+  color: var(--muted);
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ses .chip {
+  align-self: flex-start;
 }
 .ses .about {
   font-size: 13px;
@@ -572,7 +590,7 @@ a {
   overflow-wrap: anywhere;
 }
 .ses .state {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12.5px;

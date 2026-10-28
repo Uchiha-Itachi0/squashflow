@@ -68,11 +68,14 @@ export async function currentBranch(run: RunCommand, cwd: string): Promise<strin
 
 /** Tidy untrusted text for one line of the picker: no control characters, capped. */
 export function cleanTitle(raw: string): string | null {
+  return cleanText(raw, MAX_SESSION_TITLE_CHARS);
+}
+
+/** Untrusted text as one plain line of at most `max` characters, or null when empty. */
+export function cleanText(raw: string, max: number): string | null {
   const text = cleanLine(raw);
   if (text === "") return null;
-  return text.length > MAX_SESSION_TITLE_CHARS
-    ? `${text.slice(0, MAX_SESSION_TITLE_CHARS - 1).trimEnd()}…`
-    : text;
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
 function cleanLine(raw: string): string {

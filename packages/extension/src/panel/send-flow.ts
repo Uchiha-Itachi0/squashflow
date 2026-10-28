@@ -14,6 +14,7 @@ import {
 } from "@squashflow/shared";
 import type { HelperFailure } from "../helper/errors";
 import { matchSessions } from "../helper/matching";
+import { siteOf } from "../helper/sites";
 import type { AskWorker, ConnectionStatus } from "../helper/messages";
 import type { OutgoingPins } from "../helper/client";
 import type { PinTracking } from "../status/pin-status";
@@ -64,9 +65,10 @@ export interface SendState {
   /** Sessions on that repository. */
   matchingPids: readonly number[];
   /**
-   * The session pins go to: the one the user picked, or else the only session on the
-   * site's repository. With no pick and not exactly one match, nothing is selected and
-   * Send stays hidden until the user picks.
+   * The session pins go to: the one the user picked on this site, or else the only
+   * session on the site's repository. A pick made on another site, or a session that is
+   * merely the only one running, never counts: with no pick here and not exactly one
+   * match, nothing is selected and Send stays disabled until the user picks.
    */
   selectedPid: number | null;
   /** Why there is nothing to send to, with what to do instead. */
@@ -96,8 +98,8 @@ export class SendFlow {
     busy: false,
   };
 
-  /** The session the user picked themselves, kept while it is still running. */
-  private pickedPid: number | null = null;
+  /** The session the user picked themselves, on which site; kept while it is still running. */
+  private picked: { site: string | null; pid: number } | null = null;
 
   constructor(private readonly hooks: SendFlowHooks) {}
 
@@ -164,7 +166,7 @@ export class SendFlow {
   }
 
   select(pid: number): void {
-    this.pickedPid = pid;
+    this.picked = { site: this.site(), pid };
     this.update({ selectedPid: pid });
   }
 
@@ -339,19 +341,23 @@ export class SendFlow {
 
   private applySessions(sessions: readonly PublicSession[], repo: string | null): void {
     const { matching, preselectedPid } = matchSessions(sessions, repo);
-    if (!sessions.some((session) => session.pid === this.pickedPid)) this.pickedPid = null;
+    const { picked } = this;
+    if (picked !== null && !sessions.some((session) => session.pid === picked.pid)) {
+      this.picked = null;
+    }
+    const pickedHere = this.picked?.site === this.site() ? this.picked.pid : null;
     this.update({
       sessions,
       repo,
       matchingPids: matching.map((session) => session.pid),
-      selectedPid: this.pickedPid ?? preselectedPid,
+      selectedPid: pickedHere ?? preselectedPid,
       note: sessionsNote(sessions, repo, matching.length),
     });
   }
 
   private applyStatus(status: ConnectionStatus): void {
     const paired = status.state === "paired";
-    if (!paired) this.pickedPid = null;
+    if (!paired) this.picked = null;
     this.update({
       connection: status,
       ...(paired ? {} : { sessions: [], matchingPids: [], selectedPid: null, preview: null }),
@@ -367,10 +373,16 @@ export class SendFlow {
     } else if (failure.kind === "unpaired") {
       this.applyStatus({ state: "unpaired", port, message: failure.message });
     } else if (failure.kind === "gone") {
-      this.pickedPid = null;
+      this.picked = null;
       this.update({ selectedPid: null, preview: null });
     }
     this.hooks.report(failure.message, "error");
+  }
+
+  /** The site of the page the panel is on, or null with no page. */
+  private site(): string | null {
+    const pageUrl = this.hooks.pageUrl();
+    return pageUrl === null ? null : siteOf(pageUrl);
   }
 
   private async busy(action: () => Promise<void>): Promise<void> {

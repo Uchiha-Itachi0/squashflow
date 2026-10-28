@@ -6,7 +6,7 @@
  * script in the active tab over `PageLink`.
  */
 
-import type { DetailLevel } from "@squashflow/shared";
+import { sessionDisplayName, type DetailLevel } from "@squashflow/shared";
 import { copyPins, copyScreenshot, writeClipboard } from "../copy/copy";
 import { askWorker, type AskWorker } from "../helper/messages";
 import {
@@ -160,7 +160,16 @@ export class PanelApp {
       type: "target",
       target: {
         connection: this.send.state.connection.state,
-        session: target === null ? null : { name: target.name, status: target.status },
+        session:
+          target === null
+            ? null
+            : {
+                name: sessionDisplayName(target),
+                status: target.status,
+                detail: [target.terminal, target.account?.label, target.repo, target.branch]
+                  .filter(Boolean)
+                  .join(" · "),
+              },
         copyOnly: this.settings.copyOnly,
       },
     });

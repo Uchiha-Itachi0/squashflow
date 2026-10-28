@@ -374,6 +374,8 @@ export function publicSession(session: SessionInfo): PublicSession {
     branch: session.branch,
     startedAt: session.startedAt,
     lastActiveAt: session.lastActiveAt,
+    account: session.account,
+    terminal: session.terminal,
   };
 }
 

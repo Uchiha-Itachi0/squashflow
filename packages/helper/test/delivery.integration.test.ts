@@ -14,6 +14,8 @@ const session = fakeSession({
   branch: "fix/contrast",
   startedAt: "2026-10-01T12:00:00.000Z",
   lastActiveAt: "2026-10-01T12:30:00.000Z",
+  account: { label: "Acme", email: "dev@acme.dev" },
+  terminal: "~demo",
 });
 const pinsBody = {
   session: session.name,
@@ -25,6 +27,11 @@ const pinsBody = {
     },
   ],
 };
+
+/** The session, under the test's own account folder. */
+function inTestAccount(dir: string): typeof session {
+  return { ...session, configDir: join(dir, "claude") };
+}
 
 async function waitFor<T>(
   read: () => Promise<T>,
@@ -330,13 +337,14 @@ describe("delivery: POST /pins to Seen by Claude", () => {
   it("marks a pin Blocked when its transcript stays quiet for the watch lifetime", async () => {
     const delivery = new DeliveryService({
       socketDir: join(dir.path, "socks"),
-      claudeConfigDir: join(dir.path, "claude"),
       senderSocketPath: join(dir.path, "sender.sock"),
       pollMs: 10,
       watchMaxMs: 50,
     });
     try {
-      const draft = delivery.createDraft(session, "cli", undefined, [{ comment: "Fix it" }]);
+      const draft = delivery.createDraft(inTestAccount(dir.path), "cli", undefined, [
+        { comment: "Fix it" },
+      ]);
       const record = await delivery.deliver(draft);
       await new Promise((resolve) => setTimeout(resolve, 150));
       await appendFile(transcript, `${peerRecord(draft.message)}\n`);
@@ -351,13 +359,14 @@ describe("delivery: POST /pins to Seen by Claude", () => {
   it("keeps following while the transcript keeps growing", async () => {
     const delivery = new DeliveryService({
       socketDir: join(dir.path, "socks"),
-      claudeConfigDir: join(dir.path, "claude"),
       senderSocketPath: join(dir.path, "sender.sock"),
       pollMs: 10,
       watchMaxMs: 120,
     });
     try {
-      const draft = delivery.createDraft(session, "cli", undefined, [{ comment: "Fix it" }]);
+      const draft = delivery.createDraft(inTestAccount(dir.path), "cli", undefined, [
+        { comment: "Fix it" },
+      ]);
       const record = await delivery.deliver(draft);
       for (let step = 0; step < 6; step += 1) {
         await appendFile(transcript, `${JSON.stringify({ type: "progress", step })}\n`);
@@ -416,7 +425,7 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     expect(inbox.lines).toHaveLength(0);
   });
 
-  it("lists sessions with their repository and what tells them apart", async () => {
+  it("lists sessions with their repository and what tells them apart, not their account folder", async () => {
     const reply = await send(helper.server.port, { path: "/sessions", headers: helper.auth() });
     expect(reply.json()).toEqual({
       sessions: [
@@ -430,6 +439,8 @@ describe("delivery: POST /pins to Seen by Claude", () => {
           branch: "fix/contrast",
           startedAt: "2026-10-01T12:00:00.000Z",
           lastActiveAt: "2026-10-01T12:30:00.000Z",
+          account: { label: "Acme", email: "dev@acme.dev" },
+          terminal: "~demo",
         },
       ],
     });

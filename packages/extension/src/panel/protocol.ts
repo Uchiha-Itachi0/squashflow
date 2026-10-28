@@ -40,8 +40,12 @@ export type PageToPanel = z.infer<typeof pageToPanelSchema>;
 /** What the toolbar shows about where pins go. */
 export interface ToolbarTarget {
   connection: ConnectionView["state"];
-  /** The chosen session; null when none is chosen or nothing is connected. */
-  session: { name: string; status: string } | null;
+  /**
+   * The chosen session, by its display name; `detail` is the rest of its card on one
+   * line (terminal, account, repository, branch). Null when none is chosen or nothing
+   * is connected.
+   */
+  session: { name: string; status: string; detail: string } | null;
   copyOnly: boolean;
 }
 

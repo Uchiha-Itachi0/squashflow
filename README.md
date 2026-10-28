@@ -61,7 +61,7 @@ flowchart LR
 
 How the helper finds the right session:
 
-1. It lists running Claude Code sessions with `claude agents --json`.
+1. It lists running Claude Code sessions from every Claude account on your machine (a work and a personal account, say, whatever their config folders are called) with `claude agents --json`, run once per account.
 2. For each session folder it runs `git remote get-url origin` to learn which GitHub repository that session is working in.
 3. When you pin a comment on a page, the extension shows the sessions that match, and you choose one (or Squashflow picks the only match).
 
@@ -160,7 +160,7 @@ Then, with a Claude Code session open in one of your projects:
 
 ```sh
 squashflow doctor                 # checks Node, Claude Code version, git and the session inbox
-squashflow sessions               # lists running sessions with their title, branch, folder, status and GitHub repository
+squashflow sessions               # lists running sessions with their title, terminal, account, branch, status and GitHub repository
 squashflow send --session <name or pid> "Make the Buy button on /pricing blue"
 ```
 
@@ -174,6 +174,8 @@ squish → claude@my-app  pin 1  Sent
 ```
 
 If the session runs in bypass-permissions mode, Claude Code holds the message and the helper prints *approve it in the terminal*; approve it in that session's terminal and the pin moves on to *seen by Claude*. The message arrives as a request from another session, never as your own typing, and Claude Code's permissions still apply.
+
+The helper finds every account's sessions from their inbox sockets and their own environment. If an account's sessions do not show up, list its config folder in `SQUASHFLOW_CLAUDE_CONFIG_DIRS` (separated like `PATH`) before starting the helper, for example `SQUASHFLOW_CLAUDE_CONFIG_DIRS=~/.claude-personal squashflow`.
 
 `squashflow` on its own starts the helper's local server on `http://127.0.0.1:47821` and prints a pairing code for the extension (see [Try the extension](#try-the-extension)). Add `--no-color`, or set `NO_COLOR`, for plain output.
 
@@ -222,7 +224,14 @@ To send pins straight to a session instead of pasting them:
 
 1. Start the helper with `squashflow` (see [Try the helper](#try-the-helper)). It prints a pairing code.
 2. In the side panel, under **Connect to your terminal**, type the code (and the port, if you started the helper with `--port`) and press **Connect**. You pair once.
-3. Pick the session in the **Sessions** tab. Each card shows its name, whether it is idle or busy, what it is about (Claude Code's title for the session, or the start of its first prompt), its folder, repository and branch, and when it started and was last active. Nothing is chosen for you unless exactly one session is on the repository remembered for this site; sessions on that repository are marked **Matches this site**. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since. **Paste a GitHub repo link** and **Start new session** are shown but not available yet (coming soon).
+3. Pick the session in the **Sessions** tab. Sessions from all your Claude accounts are listed. Each card shows the session's name (Claude Code's own title for it, else its terminal workspace's name such as `~vma`, else its folder) with the terminal workspace beside it, and under it the account, repository, branch, whether it is idle or busy, and when it was last active:
+
+```text
+Refill new VMA index                     ~vma
+ideonlabs.com · ideon-labs/vma · main · busy · 2m ago
+```
+
+Nothing is chosen for you unless exactly one session is on the repository remembered for this site (being the only session running, or your pick on another site, does not count); sessions on that repository are marked **Matches this site**. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since. **Paste a GitHub repo link** and **Start new session** are shown but not available yet (coming soon).
 4. With **Batch, then Go** (the default), pins wait as drafts; press **Go** on the toolbar or in the side panel to send them all. With **Send each pin now**, each pin is sent as you save it. Either way the side panel first shows the exact message the session will receive; press **Send to claude@`<name>`** to deliver it, or **Cancel**. The panel then says it was sent, or why not in plain words (for example, the preview expired and needs previewing again).
 
 After sending, each pin shows its [status](#pin-status) on its marker and in the side panel: *Sent*, *Seen by Claude* or *Approve in terminal*, then *Fixed* with Claude's reply and the pull request link. Not quite right? Type a reply in the pin's conversation: it goes to the same session as a follow-up about the same element, previewed and confirmed like a pin, and the pin follows it from *Sent* again. Press **Resolve** on a pin when you are done with it, or **Reopen** to undo that. The helper follows a pin until Claude replies; if the session's transcript goes quiet for 30 minutes before the pin is picked up (for example, the session exited), the pin shows *Blocked*. Status and replies arrive while the side panel or pin mode is open, and catch up the next time you open it.

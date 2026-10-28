@@ -1,3 +1,4 @@
+import { sessionDisplayName } from "@squashflow/shared";
 import { runCommand } from "../exec.js";
 import { publicSession } from "../http/server.js";
 import { listSessions } from "../sessions.js";
@@ -15,9 +16,15 @@ export async function sessionsCommand(term: Terminal, json: boolean): Promise<nu
   }
   process.stdout.write(`${term.info(`${sessions.length} Claude Code session(s)`)}\n`);
   for (const session of sessions) {
-    const repo = session.repo?.fullName ?? term.dim("no GitHub remote");
-    const line = `  ${String(session.pid).padEnd(7)} ${session.name.padEnd(24)} ${session.status.padEnd(8)} ${repo}`;
-    const about = [session.title, session.branch && `branch ${session.branch}`]
+    const terminal = session.terminal === null ? "" : `  ${term.dim(session.terminal)}`;
+    const line = `  ${String(session.pid).padEnd(7)} ${sessionDisplayName(publicSession(session))}${terminal}`;
+    const about = [
+      session.account?.label ?? null,
+      session.repo?.fullName ?? "no GitHub remote",
+      session.branch,
+      session.status,
+      `name ${session.name}`,
+    ]
       .filter(Boolean)
       .join(" · ");
     process.stdout.write(`${line}\n`);

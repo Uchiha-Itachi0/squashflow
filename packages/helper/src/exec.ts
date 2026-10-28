@@ -5,6 +5,8 @@ import { COMMAND_TIMEOUT_MS } from "./constants.js";
 
 export interface RunOptions {
   cwd?: string;
+  /** The whole environment for the program; the helper's own when absent. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export type RunCommand = (
@@ -22,6 +24,7 @@ export const runCommand: RunCommand = (file, args, options = {}) =>
       [...args],
       {
         cwd: options.cwd,
+        env: options.env,
         shell: false,
         timeout: COMMAND_TIMEOUT_MS,
         maxBuffer: MAX_OUTPUT_BYTES,
