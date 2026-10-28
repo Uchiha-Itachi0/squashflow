@@ -282,7 +282,11 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     }>();
     const reply = await post({ ...pinsBody, pinId, digest });
     expect(reply.status).toBe(409);
-    expect(reply.json<{ error: string }>().error).toMatch(/mode 666/);
+    const { error } = reply.json<{ error: string }>();
+    expect(error).toBe(
+      "The session's inbox socket was refused (missing, not owned by you, or not mode 600)",
+    );
+    expect(error).not.toContain(dir.path);
     expect(inbox.lines).toHaveLength(0);
   });
 

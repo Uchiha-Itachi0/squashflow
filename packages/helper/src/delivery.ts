@@ -50,6 +50,19 @@ export interface PinRecord {
   updatedAt: string;
 }
 
+export type DraftErrorReason = "missing" | "changed" | "no-session-id";
+
+export class DraftError extends Error {
+  override readonly name = "DraftError";
+
+  constructor(
+    readonly reason: DraftErrorReason,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export interface DeliveryOptions {
   socketDir: string;
   claudeConfigDir: string;
@@ -104,10 +117,15 @@ export class DeliveryService {
   verifyDraft(pinId: string, digest: string, pageUrl: string, pins: readonly PinInput[]): Draft {
     this.dropExpiredDrafts();
     const draft = this.drafts.get(pinId);
-    if (!draft) throw new Error("No preview with that pin id; preview the message again.");
+    if (!draft) {
+      throw new DraftError("missing", "No preview with that pin id; preview the message again.");
+    }
     const rebuilt = buildMessage({ pinId, source: draft.source, pageUrl, pins });
     if (digestMessage(rebuilt) !== digest || digest !== draft.digest) {
-      throw new Error("The message changed since it was previewed; preview it again.");
+      throw new DraftError(
+        "changed",
+        "The message changed since it was previewed; preview it again.",
+      );
     }
     return draft;
   }
@@ -125,7 +143,8 @@ export class DeliveryService {
   private async deliverOnce(draft: Draft): Promise<PinRecord> {
     const { session } = draft;
     if (session.sessionId === null) {
-      throw new Error(
+      throw new DraftError(
+        "no-session-id",
         `Session ${session.name} has no session id, so delivery cannot be confirmed.`,
       );
     }

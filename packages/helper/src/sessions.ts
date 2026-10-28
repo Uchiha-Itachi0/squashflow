@@ -66,9 +66,26 @@ export function findSession(sessions: readonly SessionInfo[], selector: string):
   if (byName.length === 1 && byName[0]) return byName[0];
   if (byName.length > 1) {
     const pids = byName.map((session) => session.pid).join(", ");
-    throw new Error(`Several sessions are named "${trimmed}" (pids ${pids}). Pick one by pid.`);
+    throw new SessionLookupError(
+      "ambiguous",
+      `Several sessions are named "${trimmed}" (pids ${pids}). Pick one by pid.`,
+    );
   }
-  throw new Error(
+  throw new SessionLookupError(
+    "not-found",
     `No running Claude Code session matches "${trimmed}". Try \`squashflow sessions\`.`,
   );
+}
+
+export type SessionLookupReason = "not-found" | "ambiguous";
+
+export class SessionLookupError extends Error {
+  override readonly name = "SessionLookupError";
+
+  constructor(
+    readonly reason: SessionLookupReason,
+    message: string,
+  ) {
+    super(message);
+  }
 }

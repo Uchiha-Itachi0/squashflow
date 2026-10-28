@@ -2,10 +2,16 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { HELPER_VERSION, LOOPBACK_HOST } from "../constants.js";
-import type { DeliveryService } from "../delivery.js";
+import { DraftError, type DeliveryService, type DraftErrorReason } from "../delivery.js";
 import { generateToken, hashToken, type PairingCodes } from "../pairing.js";
 import { pairRequestSchema, pinsRequestSchema, type PinsRequest } from "../schemas.js";
-import { findSession, type SessionInfo } from "../sessions.js";
+import {
+  findSession,
+  SessionLookupError,
+  type SessionInfo,
+  type SessionLookupReason,
+} from "../sessions.js";
+import { SocketRefusedError } from "../socket.js";
 import type { PairingRecord } from "../state.js";
 import {
   checkDeclaredSize,
@@ -211,7 +217,7 @@ async function pins(
   try {
     session = findSession(await context.discover(), String(input.session));
   } catch (error) {
-    send(response, 404, { error: errorMessage(error) });
+    sendFailure(context, response, error, "session lookup");
     return;
   }
   if (input.preview === true) {
@@ -254,7 +260,7 @@ async function deliverPreviewed(
     send(response, 202, { pin });
     return;
   } catch (error) {
-    send(response, 409, { error: errorMessage(error) });
+    sendFailure(context, response, error, "delivery");
     return;
   }
 }
@@ -320,6 +326,53 @@ function send(response: ServerResponse, status: number, body: unknown): void {
   response.end(JSON.stringify(body));
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/**
+ * Client-facing failures use fixed strings chosen by error kind, so no caught
+ * error text (paths, command output, stack traces) reaches the HTTP response.
+ * Unexpected errors are logged in the helper's terminal only.
+ */
+const SESSION_LOOKUP_FAILURES: Record<SessionLookupReason, CheckFailure> = {
+  "not-found": { status: 404, error: "No running Claude Code session matches that session" },
+  ambiguous: { status: 409, error: "Several sessions match that name; pick one by pid" },
+};
+
+const DRAFT_FAILURES: Record<DraftErrorReason, CheckFailure> = {
+  missing: { status: 409, error: "No preview with that pin id; preview the message again" },
+  changed: { status: 409, error: "The message changed since it was previewed; preview again" },
+  "no-session-id": {
+    status: 409,
+    error: "That session has no session id, so delivery cannot be confirmed",
+  },
+};
+
+const SOCKET_REFUSED: CheckFailure = {
+  status: 409,
+  error: "The session's inbox socket was refused (missing, not owned by you, or not mode 600)",
+};
+
+export const UNEXPECTED_FAILURE: CheckFailure = {
+  status: 502,
+  error: "The helper could not complete the request; see its terminal for details",
+};
+
+export function publicFailure(error: unknown): CheckFailure {
+  if (error instanceof SessionLookupError) return SESSION_LOOKUP_FAILURES[error.reason];
+  if (error instanceof DraftError) return DRAFT_FAILURES[error.reason];
+  if (error instanceof SocketRefusedError) return SOCKET_REFUSED;
+  return UNEXPECTED_FAILURE;
+}
+
+function sendFailure(
+  context: HelperContext,
+  response: ServerResponse,
+  error: unknown,
+  operation: string,
+): void {
+  const failure = publicFailure(error);
+  if (failure === UNEXPECTED_FAILURE) {
+    context.log.warn(
+      `${operation} failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  fail(response, failure);
 }
