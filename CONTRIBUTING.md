@@ -8,7 +8,7 @@ By taking part, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Squashflow is a TypeScript monorepo using pnpm workspaces. Packages live in `packages/`; today that is `packages/helper` (published name `squashflow`).
 
-- Node.js 22.12 or later for development (`.nvmrc` pins the current LTS). The helper itself runs on Node.js 20.19 or later.
+- Node.js 22.12 or later for development (`.nvmrc` pins the current LTS). The helper itself runs on Node.js 22.12 or later.
 - pnpm, at the version in the root `package.json` `packageManager` field. With Corepack: `corepack pnpm <command>`.
 
 ```sh

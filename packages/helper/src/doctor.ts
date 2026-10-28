@@ -6,7 +6,7 @@ import type { RunCommand } from "./exec.js";
 import { listSessions } from "./sessions.js";
 import { meetsMinimum, parseVersion } from "./version.js";
 
-export const MIN_NODE_VERSION = "20.19.0";
+export const MIN_NODE_VERSION = "22.12.0";
 
 export interface DoctorCheck {
   name: string;

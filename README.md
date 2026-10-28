@@ -134,7 +134,7 @@ Beyond that, the only thing that leaves your machine is what your Claude Code se
 Requirements (subject to change before the first release):
 
 - **Google Chrome** (or a Chromium-based browser that supports Chrome extensions)
-- **Node.js** 20.19 or later for the helper (current LTS recommended)
+- **Node.js** 22.12 or later for the helper (current LTS recommended)
 - **Claude Code** 2.1.224 or later, macOS or Linux (`squashflow doctor` checks this)
 - **GitHub CLI** (`gh`), logged in with `gh auth login`
 - **git**, with your project cloned locally from GitHub
