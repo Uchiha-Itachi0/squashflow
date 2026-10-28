@@ -89,7 +89,11 @@ test("store screenshots", async () => {
         content: [
           {
             type: "text",
-            text: "Gave the Pro card a violet border and a “Most popular” badge. https://github.com/northwind/notes-web/pull/42",
+            text: [
+              "Gave the Pro card a violet border and a “Most popular” badge.",
+              "",
+              `SQUASHFLOW-FIXED [${pinIdOf(line.message.content)}] https://github.com/northwind/notes-web/pull/42`,
+            ].join("\n"),
           },
         ],
       },
@@ -99,3 +103,7 @@ test("store screenshots", async () => {
   await expect(panel.getByText("Fixed", { exact: true })).toBeVisible();
   await shoot(page, "3-fixed-with-pull-request.png");
 });
+
+function pinIdOf(message: string): string {
+  return /\[(sf-[0-9a-f]{12})\]/.exec(message)?.[1] ?? "";
+}

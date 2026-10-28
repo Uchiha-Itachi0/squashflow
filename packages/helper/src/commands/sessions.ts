@@ -17,7 +17,12 @@ export async function sessionsCommand(term: Terminal, json: boolean): Promise<nu
   for (const session of sessions) {
     const repo = session.repo?.fullName ?? term.dim("no GitHub remote");
     const line = `  ${String(session.pid).padEnd(7)} ${session.name.padEnd(24)} ${session.status.padEnd(8)} ${repo}`;
-    process.stdout.write(`${line}\n${term.dim(`          ${session.cwd}`)}\n`);
+    const about = [session.title, session.branch && `branch ${session.branch}`]
+      .filter(Boolean)
+      .join(" · ");
+    process.stdout.write(`${line}\n`);
+    if (about !== "") process.stdout.write(`${term.dim(`          ${about}`)}\n`);
+    process.stdout.write(`${term.dim(`          ${session.cwd}`)}\n`);
   }
   return 0;
 }

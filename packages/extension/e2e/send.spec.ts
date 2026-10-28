@@ -62,7 +62,8 @@ test("pair, pick a session, preview and send a pin", async () => {
   const other = panel.getByRole("radio", { name: /e2e-other/ });
   await expect(demo).not.toBeChecked();
   await expect(other).not.toBeChecked();
-  await expect(panel.getByText("acme/demo", { exact: true })).toBeVisible();
+  // Each session shows its repository with the branch checked out there.
+  await expect(panel.getByText(/^acme\/demo · \S+$/)).toBeVisible();
   await expect(panel.getByText("busy", { exact: true })).toBeVisible();
 
   await demo.check();
@@ -94,9 +95,14 @@ test("pair, pick a session, preview and send a pin", async () => {
   await expect(row.getByText("Sent", { exact: true })).toBeVisible();
   await expect(marker).toHaveAttribute("data-status", "sent");
 
-  // Claude Code records the message, then replies with a pull request link.
-  const replyText =
-    "Made the Buy button violet. <img src=x onerror=alert(1)> https://github.com/acme/demo/pull/5";
+  // Claude Code records the message, then replies with the pin's fixed line. The reply's
+  // markdown is rendered, its markup never is.
+  const pinId = /\[(sf-[0-9a-f]{12})\]/.exec(previewed)?.[1] ?? "";
+  const replyText = [
+    "Made the **Buy** button violet. <img src=x onerror=alert(1)>",
+    "",
+    `SQUASHFLOW-FIXED [${pinId}] https://github.com/acme/demo/pull/5`,
+  ].join("\n");
   await helper.appendTranscript(DEMO.pid, [
     {
       type: "user",
@@ -116,12 +122,14 @@ test("pair, pick a session, preview and send a pin", async () => {
   ]);
   await expect(row.getByText("Fixed", { exact: true })).toBeVisible();
   await expect(marker).toHaveAttribute("data-status", "fixed");
-  await expect(row.getByLabel("Claude's reply to pin 1")).toHaveText(replyText);
+  const reply = row.getByLabel("Claude's reply to pin 1");
+  await expect(reply).toContainText("Made the Buy button violet. <img src=x onerror=alert(1)>");
+  await expect(reply.locator("strong")).toHaveText("Buy");
   await expect(row.getByRole("link", { name: "Pull request for pin 1" })).toHaveAttribute(
     "href",
     "https://github.com/acme/demo/pull/5",
   );
-  // The reply is text, never markup.
+  // The reply's own markup is shown as text, never parsed.
   expect(
     await page
       .locator("squashflow-root")

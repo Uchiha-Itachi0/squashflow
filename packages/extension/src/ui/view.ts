@@ -7,6 +7,7 @@
 import { DETAIL_LEVELS, type DetailLevel, type Rect } from "@squashflow/shared";
 import { HOST_TAG } from "../constants";
 import { h, placeBox } from "./dom";
+import { renderMarkdown } from "./markdown";
 import {
   pairingFields,
   previewDialog,
@@ -388,7 +389,7 @@ function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
 }
 
 /**
- * The status chip, Claude's reply as plain text, the pull request link, Resolve or Reopen,
+ * The status chip, Claude's reply (safe markdown, see markdown.ts), the pull request link, Resolve or Reopen,
  * and the ways out of Blocked: GitHub access.
  */
 function pinStatus(pin: PanelPin, status: PinStatusView, props: PanelProps): HTMLElement {
@@ -419,11 +420,14 @@ function pinStatus(pin: PanelPin, status: PinStatusView, props: PanelProps): HTM
       }),
     ]),
     status.reply !== null &&
-      h("p", {
-        className: "reply",
-        text: status.reply.truncated ? `${status.reply.text} … (cut)` : status.reply.text,
-        attrs: { "aria-label": `Claude's reply to pin ${pin.number}` },
-      }),
+      h(
+        "div",
+        { className: "reply", attrs: { "aria-label": `Claude's reply to pin ${pin.number}` } },
+        [
+          ...renderMarkdown(status.reply.text),
+          status.reply.truncated && h("p", { className: "cut", text: "… (cut)" }),
+        ],
+      ),
     status.github !== null &&
       !resolved &&
       gitHubOptions(pin.number, status.github, props.send.state.busy, (choice) =>

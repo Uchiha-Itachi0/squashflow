@@ -46,7 +46,9 @@ describe("HelperClient", () => {
   it("sends the token only in the Authorization header", async () => {
     const fetch = fakeFetch(200, { sessions: [session] });
     const result = await new HelperClient(fetch, 5000, TOKEN).sessions();
-    expect(result).toEqual({ ok: true, value: [session] });
+    // An older helper sends no session detail; it reads as unknown.
+    const detail = { title: null, branch: null, startedAt: null, lastActiveAt: null };
+    expect(result).toEqual({ ok: true, value: [{ ...session, ...detail }] });
     expect(fetch.calls[0]?.url).toBe("http://127.0.0.1:5000/sessions");
     expect(fetch.calls[0]?.init.headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
   });

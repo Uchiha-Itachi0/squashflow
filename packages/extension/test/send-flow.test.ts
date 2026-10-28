@@ -3,12 +3,28 @@ import { describe, expect, it } from "vitest";
 import type { HelperFailure } from "../src/helper/errors";
 import type { AskWorker, WorkerReplies, WorkerRequest } from "../src/helper/messages";
 import { SendFlow } from "../src/pin-mode/send-flow";
+import { sessionTimes } from "../src/ui/send-view";
 import type { StoredPin } from "../src/store/pins";
 
 const PAGE = "https://shop.example.com/cart";
 const DIGEST = "c".repeat(64);
-const web: PublicSession = { pid: 1, name: "web", status: "idle", cwd: "/w/web", repo: "acme/web" };
-const api: PublicSession = { pid: 2, name: "api", status: "busy", cwd: "/w/api", repo: "acme/api" };
+const detail = { title: null, branch: null, startedAt: null, lastActiveAt: null };
+const web: PublicSession = {
+  pid: 1,
+  name: "web",
+  status: "idle",
+  cwd: "/w/web",
+  repo: "acme/web",
+  ...detail,
+};
+const api: PublicSession = {
+  pid: 2,
+  name: "api",
+  status: "busy",
+  cwd: "/w/api",
+  repo: "acme/api",
+  ...detail,
+};
 
 const pin = (id: string, comment: string): StoredPin => ({
   id,
@@ -132,6 +148,40 @@ describe("SendFlow session picker", () => {
     const empty = flow(fakeWorker({ status: paired, sessions: sessionsOf([], null) }));
     await empty.send.start();
     expect(empty.send.state.note).toMatch(/No Claude Code session is running.*copy/);
+  });
+
+  it("preselects nothing unless exactly one session is on the site's repository", async () => {
+    // The captain's case: the first session listed was on another repository and
+    // nothing was known for the site; it must not be chosen for the user.
+    const firstmate = { ...web, pid: 3, name: "firstmate-e1", repo: "kunchenguid/firstmate" };
+    const vma86 = { ...api, pid: 4, name: "vma-86", repo: "ideon-labs/vma" };
+    const vma85 = { ...api, pid: 5, name: "vma-85", repo: "ideon-labs/vma" };
+    for (const repo of [null, "acme/pollenflow", "ideon-labs/vma"]) {
+      const { send } = flow(
+        fakeWorker({ status: paired, sessions: sessionsOf([firstmate, vma86, vma85], repo) }),
+      );
+      await send.start();
+      expect(send.state.selectedPid).toBeNull();
+      expect(send.target).toBeNull();
+    }
+  });
+
+  it("keeps the user's own pick across refreshes, and drops a preselection that no longer fits", async () => {
+    let repo: string | null = "acme/api";
+    const worker = fakeWorker({
+      status: paired,
+      sessions: () => ({ ok: true, value: { sessions: [web, api], repo } }),
+    });
+    const { send } = flow(worker);
+    await send.start();
+    expect(send.target).toEqual(api);
+    repo = null;
+    await send.refresh();
+    expect(send.target).toBeNull();
+
+    send.select(1);
+    await send.refresh();
+    expect(send.target).toEqual(web);
   });
 
   it("remembers the chosen session's repository for the site and rematches", async () => {
@@ -292,5 +342,24 @@ describe("SendFlow preview then send", () => {
     await unpaired.send.preview([pin("sf-aaaaaaaaaaaa", "One")]);
     expect(unpaired.send.state.connection.state).toBe("unpaired");
     expect(unpaired.send.target).toBeNull();
+  });
+});
+
+describe("sessionTimes", () => {
+  const now = Date.parse("2026-10-28T12:00:00.000Z");
+  it("says when a session started and was last active", () => {
+    expect(
+      sessionTimes(
+        { ...web, startedAt: "2026-10-28T09:00:00.000Z", lastActiveAt: "2026-10-28T11:58:00.000Z" },
+        now,
+      ),
+    ).toBe("started 3h ago · active 2m ago");
+    expect(sessionTimes({ ...web, startedAt: "2026-10-25T12:00:00.000Z" }, now)).toBe(
+      "started 3d ago",
+    );
+    expect(sessionTimes({ ...web, lastActiveAt: "2026-10-28T11:59:30.000Z" }, now)).toBe(
+      "active just now",
+    );
+    expect(sessionTimes({ ...web, startedAt: "not a date" }, now)).toBe("");
   });
 });

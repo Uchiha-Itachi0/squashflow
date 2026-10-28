@@ -125,7 +125,15 @@ button.danger:hover { border-color: #D93F5B; color: #D93F5B; }
 .github .options { display: flex; flex-wrap: wrap; gap: 4px; }
 .github .login { display: flex; gap: 6px; align-items: center; }
 .github .spacer { flex: 1; }
-.reply { margin: 0; padding: 4px 6px; border-left: 2px solid var(--violet); background: #F6F5FE; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow: auto; }
+.reply { margin: 0; padding: 4px 6px; border-left: 2px solid var(--violet); background: #F6F5FE; font-size: 12px; word-break: break-word; max-height: 120px; overflow: auto; }
+.reply p, .reply ul, .reply ol, .reply pre { margin: 0 0 4px; }
+.reply > :last-child { margin-bottom: 0; }
+.reply ul, .reply ol { padding-left: 18px; }
+.reply code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #ECEAFB; border-radius: 3px; padding: 0 2px; }
+.reply pre { background: #ECEAFB; border-radius: 4px; padding: 4px 6px; overflow-x: auto; white-space: pre; }
+.reply pre code { background: none; padding: 0; }
+.reply a { color: var(--violet); word-break: break-all; }
+.reply .cut { color: var(--muted); }
 .marker.s-seen { background: var(--violet-dark); }
 .marker.s-approve-in-terminal, .marker.s-blocked { background: #D93F5B; }
 .marker.s-fixed { background: #1F9D55; }
@@ -159,9 +167,10 @@ button.danger:hover { border-color: #D93F5B; color: #D93F5B; }
 .sessions { display: flex; flex-direction: column; gap: 2px; max-height: 150px; overflow: auto; }
 .session { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; padding: 4px; border-radius: 6px; cursor: pointer; }
 .session:hover { background: #F6F5FE; }
-.session input { grid-row: span 3; margin: 2px 0 0; accent-color: var(--violet); }
+.session input { grid-row: span 5; margin: 2px 0 0; accent-color: var(--violet); }
 .session .who { display: flex; gap: 6px; align-items: center; }
 .session .name { font-weight: 600; }
+.session .about { grid-column: 2; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session .where { grid-column: 2; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state { font-size: 11px; border-radius: 4px; padding: 0 5px; background: #E7F6EC; color: #237A42; }
 .state.busy { background: #FFF4E0; color: #9A6200; }

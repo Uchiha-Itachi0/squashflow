@@ -1,8 +1,13 @@
-/** Session discovery (`claude agents --json`) and repository matching (`git remote get-url origin`). */
+/**
+ * Session discovery (`claude agents --json`), repository matching (`git remote get-url
+ * origin`), and what tells sessions apart in the picker (session-detail.ts).
+ */
 
 import { z } from "zod";
 import type { RunCommand } from "./exec.js";
 import { normaliseRemoteUrl, type RepoRef } from "./repo.js";
+import { currentBranch, readTranscriptDetail } from "./session-detail.js";
+import { claudeConfigDir, locateTranscript } from "./transcript.js";
 
 const agentSchema = z.object({
   pid: z.number().int().positive(),
@@ -10,6 +15,8 @@ const agentSchema = z.object({
   name: z.string().optional(),
   status: z.string().optional(),
   sessionId: z.string().optional(),
+  /** Milliseconds since the epoch. */
+  startedAt: z.number().int().positive().optional(),
 });
 
 export interface SessionInfo {
@@ -19,9 +26,17 @@ export interface SessionInfo {
   cwd: string;
   sessionId: string | null;
   repo: RepoRef | null;
+  /** Claude Code's title for the session, or the start of its first prompt. Untrusted. */
+  title: string | null;
+  branch: string | null;
+  startedAt: string | null;
+  lastActiveAt: string | null;
 }
 
-export async function listSessions(run: RunCommand): Promise<SessionInfo[]> {
+export async function listSessions(
+  run: RunCommand,
+  configDir: string = claudeConfigDir(),
+): Promise<SessionInfo[]> {
   const output = await run("claude", ["agents", "--json"]);
   let raw: unknown;
   try {
@@ -35,15 +50,35 @@ export async function listSessions(run: RunCommand): Promise<SessionInfo[]> {
     return parsed.success ? [parsed.data] : [];
   });
   return Promise.all(
-    agents.map(async (agent) => ({
-      pid: agent.pid,
-      name: agent.name ?? `pid-${agent.pid}`,
-      status: agent.status ?? "unknown",
-      cwd: agent.cwd,
-      sessionId: agent.sessionId ?? null,
-      repo: await repoForFolder(run, agent.cwd),
-    })),
+    agents.map(async (agent) => {
+      const sessionId = agent.sessionId ?? null;
+      const [repo, branch, detail] = await Promise.all([
+        repoForFolder(run, agent.cwd),
+        currentBranch(run, agent.cwd),
+        sessionId === null
+          ? { title: null, lastActiveAt: null }
+          : locateTranscript(configDir, agent.cwd, sessionId).then(readTranscriptDetail),
+      ]);
+      return {
+        pid: agent.pid,
+        name: agent.name ?? `pid-${agent.pid}`,
+        status: agent.status ?? "unknown",
+        cwd: agent.cwd,
+        sessionId,
+        repo,
+        title: detail.title,
+        branch,
+        startedAt: isoTime(agent.startedAt),
+        lastActiveAt: detail.lastActiveAt,
+      };
+    }),
   );
+}
+
+function isoTime(epochMs: number | undefined): string | null {
+  if (epochMs === undefined) return null;
+  const date = new Date(epochMs);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 export async function repoForFolder(run: RunCommand, cwd: string): Promise<RepoRef | null> {

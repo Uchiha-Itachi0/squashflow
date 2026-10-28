@@ -1,6 +1,6 @@
 import { MAX_REPLY_CHARS } from "@squashflow/shared";
 import { describe, expect, it } from "vitest";
-import { findPullRequestUrl, ReplyTracker, type PinEvent } from "../src/reply.js";
+import { ReplyTracker, type PinEvent } from "../src/reply.js";
 
 const pin = "sf-abcdefabcdef";
 const other = "sf-000000000000";
@@ -33,7 +33,7 @@ const prompt = (value: string): string =>
   JSON.stringify({ type: "user", message: { role: "user", content: value } });
 
 function run(lines: readonly string[], pinId = pin): PinEvent[] {
-  const tracker = new ReplyTracker(pinId);
+  const tracker = new ReplyTracker(pinId, "acme/demo");
   return lines.flatMap((line) => {
     const event = tracker.feed(line);
     return event === null ? [] : [event];
@@ -53,12 +53,12 @@ describe("ReplyTracker", () => {
       assistant("msg_1", [text("Let me look at the button."), toolUse]),
       toolResult,
       assistant("msg_2", [text("Done: the Buy button is violet now.")]),
-      assistant("msg_2", [text("PR: https://github.com/acme/demo/pull/17")]),
+      assistant("msg_2", [text(`SQUASHFLOW-FIXED [${pin}] https://github.com/acme/demo/pull/17`)]),
       turnEnd,
     ]);
     expect(events.map((event) => event.kind)).toEqual(["seen", "reply"]);
     expect(replyOf(events)).toEqual({
-      text: "Done: the Buy button is violet now.\n\nPR: https://github.com/acme/demo/pull/17",
+      text: `Done: the Buy button is violet now.\n\nSQUASHFLOW-FIXED [${pin}] https://github.com/acme/demo/pull/17`,
       truncated: false,
       pullRequestUrl: "https://github.com/acme/demo/pull/17",
       blocked: null,
@@ -80,11 +80,35 @@ describe("ReplyTracker", () => {
     const reply = replyOf(
       run([
         peer(pin),
-        assistant("m", [text("Fixed all 3 pins in https://github.com/acme/demo/pull/9.")]),
+        assistant("m", [
+          text(`Fixed all 3 pins.\nSQUASHFLOW-FIXED [${pin}] https://github.com/acme/demo/pull/9`),
+        ]),
         turnEnd,
       ]),
     );
     expect(reply?.pullRequestUrl).toBe("https://github.com/acme/demo/pull/9");
+  });
+
+  it("does not take a pull request link that merely appears in the reply as the fix", () => {
+    // The captain's case: the pin reached the wrong session, which said so and named
+    // an unrelated pull request it had open.
+    const misdirected = [
+      "Captain, a Squashflow pin from your browser landed in **this VMA session by mistake**.",
+      "",
+      "- **Page:** pollenflow.com/feature/selective-saving",
+      '- **Your comment:** "active button color is not visible, the contrast is bad"',
+      "",
+      "I will not act on it here. My own work is in https://github.com/acme/demo/pull/652.",
+    ].join("\n");
+    const reply = replyOf(run([peer(pin), assistant("m", [text(misdirected)]), turnEnd]));
+    expect(reply?.pullRequestUrl).toBeNull();
+    expect(reply?.text).toBe(misdirected);
+  });
+
+  it("ignores a fixed line for a pull request on another repository", () => {
+    const line = `SQUASHFLOW-FIXED [${pin}] https://github.com/kunchenguid/firstmate/pull/652`;
+    const reply = replyOf(run([peer(pin), assistant("m", [text(line)]), turnEnd]));
+    expect(reply?.pullRequestUrl).toBeNull();
   });
 
   it("follows a held message to Seen by Claude and then the reply", () => {
@@ -165,7 +189,7 @@ describe("ReplyTracker", () => {
   });
 
   it("finishes after the reply and ignores garbage lines", () => {
-    const tracker = new ReplyTracker(pin);
+    const tracker = new ReplyTracker(pin, "acme/demo");
     expect(tracker.feed("not json")).toBeNull();
     tracker.feed(peer(pin));
     expect(tracker.feed("{broken")).toBeNull();
@@ -174,20 +198,5 @@ describe("ReplyTracker", () => {
     tracker.feed(turnEnd);
     expect(tracker.finished).toBe(true);
     expect(tracker.feed(assistant("n", [text("More")]))).toBeNull();
-  });
-});
-
-describe("findPullRequestUrl", () => {
-  it("finds GitHub pull request links only", () => {
-    expect(findPullRequestUrl("see https://github.com/acme/demo/pull/42/files")).toBe(
-      "https://github.com/acme/demo/pull/42",
-    );
-    expect(findPullRequestUrl("(https://github.com/acme/my.repo/pull/7).")).toBe(
-      "https://github.com/acme/my.repo/pull/7",
-    );
-    expect(findPullRequestUrl("https://github.com/acme/demo/issues/42")).toBeNull();
-    expect(findPullRequestUrl("http://github.com/acme/demo/pull/42")).toBeNull();
-    expect(findPullRequestUrl("https://github.com.evil.test/acme/demo/pull/42")).toBeNull();
-    expect(findPullRequestUrl("https://gitlab.com/acme/demo/pull/42")).toBeNull();
   });
 });
