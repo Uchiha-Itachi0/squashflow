@@ -31,7 +31,7 @@ Squashflow has four pieces, plus one optional piece for your own React apps.
 | **Chrome extension** | Lets you place pins on any page, captures page context (selector, text, styles, region), shows the session picker, per-pin status and reply threads, and offers a copy-to-clipboard fallback. | The extension (planned for the Chrome Web Store). |
 | **Local helper** | A small process started with `npx squashflow`. It listens only on `127.0.0.1`, is paired once with your browser, lists your running Claude Code sessions, matches each session's folder to its GitHub repository, delivers pins into the session you choose, and watches the session transcript to confirm delivery and pick up Claude's reply. | Nothing permanent; runs through `npx`. |
 | **Your Claude Code session** | The session you already have open in your terminal. It receives the pin, edits the code, pushes a branch and opens the pull request. | Nothing new. |
-| **GitHub** | Hosts the branch and pull request. All GitHub actions use your existing `gh` login. Squashflow never stores a token. | Nothing new, if you already use `gh`. |
+| **GitHub** | Hosts the branch and pull request. All GitHub actions use your existing `gh` login. Squashflow never stores GitHub tokens; the only secret it keeps is the local pairing token. | Nothing new, if you already use `gh`. |
 | **Dev overlay** (optional) | A `<Squashflow />` component you can add to your own React app on `localhost`. It adds the source file and line number behind each element to the pin, so Claude goes straight to the right code. | An npm package in your app's dev dependencies. |
 
 ```mermaid
@@ -118,7 +118,7 @@ Squashflow is designed so that a browser extension talking to a local process ca
 - **You see everything that is sent.** Every outgoing message is shown to you before it is delivered.
 - **Honest provenance.** A message never claims to come from somewhere it did not. Page text is placed in the message as clearly fenced data, not as instructions.
 - **OS-level delivery protection.** Delivery uses a local socket that only your own OS user account can write to.
-- **No token storage.** GitHub access goes through your existing `gh` login. Squashflow never stores GitHub tokens.
+- **No GitHub token storage.** GitHub access goes through your existing `gh` login. Squashflow never stores GitHub tokens.
 
 The full threat model, and how to report a vulnerability, is in [SECURITY.md](SECURITY.md).
 

@@ -58,7 +58,7 @@ Planned mitigations:
 - **Loopback only.** The helper binds to `127.0.0.1` and never to `0.0.0.0` or another interface, so other machines on the network cannot reach it.
 - **One-time pairing.** On first run the helper shows a short pairing code in the terminal. You enter it in the extension, which receives a random pairing token. Pairing codes are single-use, short-lived and limited in attempts.
 - **Token on every request.** Every request other than pairing must carry the pairing token. A web page cannot read the token from the extension's storage.
-- **Origin and Host allowlist.** The helper rejects requests whose `Origin` is not the paired extension, and requests whose `Host` header is not the exact loopback address and port it listens on. Checking `Host` defeats DNS rebinding, because a rebinding page still sends its own domain name in `Host`.
+- **Origin and Host allowlist.** The helper rejects requests whose `Origin` is not the paired extension, and requests whose `Host` header is not exactly `127.0.0.1:<port>`, the loopback address and port it listens on. Checking `Host` defeats DNS rebinding, because a rebinding page still sends its own domain name in `Host`.
 - **No permissive CORS.** The helper never answers with a wildcard `Access-Control-Allow-Origin`.
 - **Size caps.** Request bodies and messages have a fixed maximum size, and oversized requests are rejected before parsing.
 
@@ -87,7 +87,7 @@ Planned mitigations:
 
 ### Threat: credential theft
 
-- Squashflow never stores GitHub tokens or any other credential. All GitHub operations go through your existing `gh` login, run by your Claude Code session.
+- Squashflow never stores GitHub tokens or other third-party credentials. The only secret it keeps is the local pairing token (in extension storage, plus a hash in user-only helper state). All GitHub operations go through your existing `gh` login, run by your Claude Code session.
 - The pairing token is local to your machine, grants access only to the helper, and can be revoked by re-pairing.
 - There is no Squashflow server, so there is no central store of user data or credentials to breach.
 

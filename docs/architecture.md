@@ -7,7 +7,7 @@ For a shorter overview, see the [README](../README.md). For the threat model and
 ## Goals and constraints
 
 - **Local-first.** No Squashflow server. Everything except GitHub runs on the user's machine.
-- **Use what the user already has.** The user's existing Claude Code session does the work, and the user's existing `gh` login does the GitHub work. Squashflow adds no accounts and stores no tokens.
+- **Use what the user already has.** The user's existing Claude Code session does the work, and the user's existing `gh` login does the GitHub work. Squashflow adds no accounts and stores no GitHub tokens or other third-party credentials; the only secret it keeps is the local pairing token.
 - **The user stays in control.** Every outgoing message is shown before it is delivered, and Claude Code's own permission model is never bypassed.
 - **Fail useful.** When delivery is impossible (no session, a site the user does not own, no push access), Squashflow falls back to something the user can still act on.
 
@@ -76,7 +76,7 @@ All endpoints except pairing require the pairing token. All responses are JSON. 
 
 Every request is checked in this order, and rejected on the first failure:
 
-1. **Host.** The `Host` header must be exactly `127.0.0.1:<port>` or `localhost:<port>`. This defeats DNS rebinding, where a hostile domain is made to resolve to `127.0.0.1` but the browser still sends that domain in `Host`.
+1. **Host.** The `Host` header must be exactly `127.0.0.1:<port>`. This defeats DNS rebinding, where a hostile domain is made to resolve to `127.0.0.1` but the browser still sends that domain in `Host`.
 2. **Origin.** The `Origin` header must be the extension's own `chrome-extension://<id>` origin. Requests from web page origins, or with no `Origin` on state-changing methods, are rejected.
 3. **Size.** The body must be within the configured limit before it is read in full.
 4. **Token.** The `Authorization` header must carry the current pairing token, compared in constant time.
@@ -132,7 +132,7 @@ Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──
 
 ## GitHub flow
 
-- The session creates a branch, commits, pushes and opens a pull request with the user's own `gh` login and git credentials. Squashflow never sees or stores a token.
+- The session creates a branch, commits, pushes and opens a pull request with the user's own `gh` login and git credentials. Squashflow never sees or stores a GitHub token.
 - If the push or pull request fails because the user lacks access, the pin moves to **Blocked: GitHub access** with these options:
   - **Log in:** run `gh auth login` and retry.
   - **Fork and open a PR:** the session forks the repository and opens the pull request from the fork.
