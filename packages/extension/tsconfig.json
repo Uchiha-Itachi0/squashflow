@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["chrome", "node"]
+  },
+  "include": [
+    ".plasmo/index.d.ts",
+    "src",
+    "test",
+    "e2e",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
+}

@@ -5,7 +5,7 @@ Pin a comment on any website, and your own Claude Code session fixes it and open
 Squashflow lets you hover over any live or local website and pin a comment on an element, a piece of text, a dragged area, or several elements at once. The comment, along with the page context Claude needs, is delivered to the Claude Code session you already have running in your terminal. That session fixes the code, pushes a branch and opens a pull request with your own GitHub login, then replies on the pin. There is no Squashflow server in the middle: everything except GitHub runs on your own machine.
 
 > **Status: early development.**
-> The local helper (build step 1) works: it lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension, dev overlay, replies and GitHub flow are not built yet, so most of this README still describes the planned design. The helper is not published to npm yet; see [Try the helper](#try-the-helper) to run it from a clone. See the [roadmap](#roadmap) for progress.
+> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension (build step 2) places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level; it does not talk to the helper yet, so pins reach a session by copy and paste. The session picker, replies, GitHub flow and dev overlay are not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
 
 ## Contents
 
@@ -18,6 +18,7 @@ Squashflow lets you hover over any live or local website and pin a comment on an
 - [Privacy](#privacy)
 - [Requirements](#requirements)
 - [Try the helper](#try-the-helper)
+- [Try the extension](#try-the-extension)
 - [Roadmap](#roadmap)
 - [Comparison and credits](#comparison-and-credits)
 - [Contributing](#contributing)
@@ -168,14 +169,44 @@ squish → claude@my-app  pin 1  Sent
 
 If the session runs in bypass-permissions mode, Claude Code holds the message and the helper prints *approve it in the terminal*; approve it in that session's terminal and the pin moves on to *seen by Claude*. The message arrives as a request from another session, never as your own typing, and Claude Code's permissions still apply.
 
-`squashflow` on its own starts the helper's local server on `http://127.0.0.1:47821` and prints a pairing code for the (not yet built) extension. Add `--no-color`, or set `NO_COLOR`, for plain output.
+`squashflow` on its own starts the helper's local server on `http://127.0.0.1:47821` and prints a pairing code for the extension (pairing arrives with the session picker, build step 3). Add `--no-color`, or set `NO_COLOR`, for plain output.
+
+## Try the extension
+
+The extension is not in the Chrome Web Store yet. Build it from a clone (see [Try the helper](#try-the-helper) for the clone and install steps) and load it unpacked:
+
+```sh
+corepack pnpm build
+```
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. Click **Load unpacked** and choose `packages/extension/build/chrome-mv3-prod`.
+3. Pin Squashflow to the toolbar if you like.
+
+On any `http` or `https` page, click the Squashflow button or press **Alt+Shift+P** to turn pin mode on (change the shortcut at `chrome://extensions/shortcuts`). While pin mode is on, clicks place pins instead of reaching the page:
+
+- **Click** an element to pin it, or **drag** to pin an area.
+- **Shift+click** several elements, then release Shift to pin them together.
+- Switch to **Text** and select text to pin the selection.
+
+Each pin gets a numbered marker and a comment box. The panel lists the page's pins, where you can edit, delete or copy them. Choose a detail level (compact, standard, detailed, or forensic, which has no screenshots yet) and press **Copy** on one pin or **Copy all**, then paste the text into your Claude Code session. Press **Escape** to close the comment box, and again to leave pin mode. Pins are kept in the extension's local storage, per page, until you delete them.
+
+The extension asks for as little as it can:
+
+| Permission | Why |
+| --- | --- |
+| `activeTab` | Lets the extension act on the current tab only, and only after you click its button or press its shortcut. There are no host permissions: it cannot read or change any site on its own. |
+| `scripting` | Injects the pin mode script into that tab when you turn pin mode on. Nothing is injected into pages you have not asked for. |
+| `storage` | Keeps your pins in the extension's local storage, which web pages cannot read. |
+
+There is no remote code: everything the extension runs ships inside it. It never captures the values of form fields (including password and hidden fields), and every captured field is size-capped; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The pin UI runs inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool.
 
 ## Roadmap
 
 The planned build order.
 
 - [x] 1. Helper: list sessions, match repositories, send a pin, confirm delivery
-- [ ] 2. Overlay with pins and page context, plus copy-to-clipboard
+- [x] 2. Pins and page context in the browser, plus copy-to-clipboard
 - [ ] 3. Session picker
 - [ ] 4. Claude replies and pin status
 - [ ] 5. GitHub flow (branch, pull request, blocked-access options)

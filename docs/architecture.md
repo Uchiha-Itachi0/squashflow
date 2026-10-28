@@ -1,6 +1,6 @@
 # Squashflow architecture
 
-> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper); the sections on the helper, pairing, discovery, the message and delivery describe what it does today. Everything else (extension, dev overlay, replies, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
+> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper), and the extension's pins, page context and copy (build step 2) in [`packages/extension`](../packages/extension), with the message builder they share in [`packages/shared`](../packages/shared). The sections on the helper, pairing, discovery, the message, delivery, the extension and copy describe what the code does today. Everything else (session picker, dev overlay, replies, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
 
 For a shorter overview, see the [README](../README.md). For the threat model and vulnerability reporting, see [SECURITY.md](../SECURITY.md).
 
@@ -114,6 +114,8 @@ A message delivered to a session has a fixed structure:
 3. **Page context, fenced as data.** Selectors, element text, attributes, computed styles and source file and line (from the dev overlay), as JSON inside `<untrusted-page-context>` with a line telling Claude it is untrusted data and not to follow instructions in it. Every `<`, `>` and `&` in the JSON is escaped, so page content can never close the fence or the surrounding wrapper. Region screenshots are not supported yet.
 4. **Requested outcome.** Fix the issue on a new branch, open a pull request, and reply with a summary and the link.
 
+The builder lives in `@squashflow/shared` and is used by both the helper (delivery) and the extension (copy), so both produce the same structure, fencing and escaping. A copied message states its provenance as copied from the user's browser and pasted by the user, and is filtered to the chosen [copy detail level](#fallbacks); a delivered message carries the context exactly as the extension sent it.
+
 The previewed message is the delivered message:
 
 1. `POST /pins` with `"preview": true` builds the message and returns it with its `pinId` and SHA-256 `digest`, without delivering anything.
@@ -150,6 +152,56 @@ Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──
   - **Copy the patch:** copy the diff to the clipboard to share another way.
   - **Ask the owner:** copy a ready-made message describing the change for the repository owner.
 
+## The extension
+
+A Manifest V3 Chrome extension built with Plasmo, in TypeScript.
+
+### Permissions and injection
+
+The manifest asks for `activeTab`, `scripting` and `storage`, and nothing else: no host permissions, no declared content scripts, no remote code. Clicking the toolbar button (or the `Alt+Shift+P` shortcut, which triggers the same action) grants `activeTab` for that tab, and the service worker injects the pin mode script into it with `chrome.scripting.executeScript`. Pages other than `http` and `https`, and pages the browser protects, are refused with a badge on the button. Each injection toggles pin mode: the script's isolated world keeps the running instance between injections on the same page.
+
+### Pin mode
+
+While pin mode is on, the extension listens in the capture phase and stops the page from seeing clicks, so the page does not react:
+
+| Pin | How |
+| --- | --- |
+| Element | Click it. |
+| Dragged area | Press and drag more than 6 px. The pin records the area, the elements wholly inside it, and the deepest element enclosing them. |
+| Several elements | Shift+click each one, then release Shift. |
+| Text selection | Switch the panel to Text and select text. The pin records the selected text and the element holding it. |
+
+A new pin opens a comment box; the pin is saved only when the comment is. Each pin gets a numbered marker, placed on its element if the selector still finds it and otherwise where it was captured. Escape closes the comment box, then clears a Shift selection, then leaves pin mode.
+
+All of the UI lives in a shadow root on a `<squashflow-root>` element appended to `<html>`. Its styles live inside the shadow root, so they never reach the page, and `all: initial !important` on the host stops inherited page styles, including a page's `!important` rules, from reaching in. Keys typed in the UI are stopped at the host so they do not trigger the page's own shortcuts. The page's scripts can still observe input to in-page UI, so comments are not secret from the page.
+
+### Page context
+
+Each pin captures context at the Detailed level, validated against the shared `pageContextSchema` (the same schema the helper checks request bodies with):
+
+| Field | Contents |
+| --- | --- |
+| `kind` | `element`, `elements`, `text` or `area`. |
+| `selector` | A selector that matches only this element: a stable id, else a test id (`data-testid`, `data-test`, `data-cy`, `data-qa`), `name` or `aria-label`, else a short path of tags and stable class names anchored on the nearest such ancestor, with `:nth-of-type` only where needed. Ids and classes that look generated (CSS-in-JS, CSS modules, framework ids, long digit runs) are skipped. |
+| `text` | The element's text, whitespace collapsed, without script, style or form field text. Capped at 300 characters. |
+| `attributes` | Up to 20 attributes, each value capped at 200 characters. |
+| `styles` | 25 computed style properties (layout, box, colour, type, flex and grid), leaving out values that only restate a default. |
+| `structure` | An indented outline of up to 3 ancestors, 3 siblings on each side and 6 children, as tags, ids, stable classes and roles only. Capped at 1500 characters. |
+| `rect`, `area` | Boxes in page coordinates. |
+| `selectedText` | For text pins, capped at 1000 characters. |
+| `elements` | For multi-element and area pins, up to 20 more elements, each captured like the first. |
+| `viewport` | Width, height, scroll position and device pixel ratio. |
+
+Never captured: the value of any form field, typed or default (the `value` attribute and the text of `input`, `textarea`, `select` and `option`, including password and hidden inputs), inline event handler attributes (`on*`), `nonce`, `integrity` and `srcdoc`. Nothing from inside the pin UI is captured.
+
+### Storage
+
+Pins are kept in `chrome.storage.local`, which web pages cannot read, under one key per page, `pins:<origin><path>`; query strings and fragments share the page's pins. Each stored pin has its id (`sf-<12 hex>`), comment, context, page URL (without the fragment) and timestamps. A page holds at most 50 pins, the most the helper accepts in one message. Everything read back is validated, and entries that fail are dropped.
+
+### Copy
+
+Copy builds the message with the shared builder, filtered to the chosen detail level, and writes it to the clipboard with the async clipboard API, falling back to `execCommand("copy")` on plain `http` pages where that API is missing. Copying one pin uses the pin's own id in the header; copying several uses a fresh id and numbers the comments.
+
 ## Fallbacks
 
 | Situation | Behaviour |
@@ -162,14 +214,14 @@ Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──
 | Busy session | Message is delivered and handled between steps. |
 | No push access | **Blocked: GitHub access** with the options above. |
 
-Copy detail levels:
+Copy detail levels. Each level adds to the one before; key attributes are `id`, `class`, `name`, `role`, `type`, `href`, `src`, `alt`, `title`, `placeholder`, `for`, `aria-label`, `aria-labelledby`, `data-testid`, `data-test` and `data-cy`.
 
 | Level | Contents |
 | --- | --- |
-| Compact | Comment and element selector. |
-| Standard | Adds page URL, element text and key attributes. |
-| Detailed | Adds computed styles, surrounding structure and source location when available. |
-| Forensic | Adds full context, including region screenshots and every captured attribute. |
+| Compact | Comment and element selectors. No page URL. |
+| Standard | Adds the page URL, element text, selected text and key attributes. |
+| Detailed | Adds computed styles, surrounding structure, positions, the viewport, the pin kind and the source location when available. |
+| Forensic | Everything captured, including every captured attribute. Region screenshots are not captured yet. |
 
 ## Dev overlay
 
@@ -178,7 +230,7 @@ Copy detail levels:
 ## Local data
 
 - Helper state (pairing token hash, extension origin) is stored in `~/.squashflow/state.json`, readable and writable only by the user.
-- Pins and threads are stored in the extension's local storage.
+- Pins are stored in the extension's local storage, per page (see [Storage](#storage)). Threads will be too.
 - Nothing is sent to a Squashflow server, because there is none, and there is no telemetry.
 
 ## Minimum Claude Code version
@@ -188,7 +240,7 @@ The helper needs Claude Code **2.1.224** or later: the first release with the se
 ## Build order
 
 1. Helper: list sessions, match repositories, send, confirm. (Done.)
-2. Overlay with pins and context, plus copy.
+2. Pins and page context in the browser, plus copy. (Done.)
 3. Session picker.
 4. Claude replies and pin status.
 5. GitHub flow.
@@ -198,3 +250,4 @@ The helper needs Claude Code **2.1.224** or later: the first release with the se
 
 - How live sites are mapped to repositories when there is no dev overlay.
 - How region screenshots are stored and passed to the session.
+- How `@squashflow/shared` ships with the helper on npm: published alongside it, or bundled into it.

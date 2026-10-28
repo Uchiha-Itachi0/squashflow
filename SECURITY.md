@@ -2,7 +2,7 @@
 
 Squashflow connects a browser extension to a local process that can deliver messages into a coding agent with access to your source code and your GitHub login. That makes security a design requirement, not an add-on. This document describes how to report a vulnerability and the threat model the project is built against.
 
-Squashflow is in early development and nothing is released yet. The local helper is implemented, so its mitigations below (loopback binding, pairing, request checks, message fencing, socket checks) describe what it does today; [docs/architecture.md](docs/architecture.md) has the exact values. Mitigations that belong to the extension are still the **planned design**, and this document is updated as that code lands.
+Squashflow is in early development and nothing is released yet. The local helper is implemented, so its mitigations below (loopback binding, pairing, request checks, message fencing, socket checks) describe what it does today; [docs/architecture.md](docs/architecture.md) has the exact values. The extension's pins, page context capture and copy are implemented too: it asks only for `activeTab`, `scripting` and `storage`, injects nothing until you click it, never captures form field values, and fences page context in copied text exactly as the helper does in delivered messages (see the [README](README.md#try-the-extension) and [docs/architecture.md](docs/architecture.md#the-extension)). The extension's side of pairing and delivery is still the **planned design**, and this document is updated as that code lands.
 
 ## Supported versions
 

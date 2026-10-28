@@ -3,3 +3,7 @@ dist/
 coverage/
 # Prose is formatted by hand.
 *.md
+build/
+.plasmo/
+playwright-report/
+test-results/
