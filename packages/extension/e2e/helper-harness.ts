@@ -26,6 +26,8 @@ export interface FakeSessionSpec {
 export interface RunningHelper {
   port: number;
   pairingCode: string;
+  /** The helper's state folder (`SQUASHFLOW_HOME`), where it writes region screenshots. */
+  home: string;
   /** NDJSON lines written to the fake inbox of the given session pid. */
   inboxLines(pid: number): string[];
   /** Resolves with the first line written to that inbox. */
@@ -100,6 +102,7 @@ export async function startHelper(sessions: readonly FakeSessionSpec[]): Promise
   return {
     port,
     pairingCode,
+    home: join(root, "home"),
     inboxLines: (pid) => inbox(pid).lines,
     received: (pid) => inbox(pid).received,
     appendTranscript: async (pid, records) => {

@@ -11,7 +11,10 @@
     "build": "plasmo build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "package": "plasmo build && node scripts/package.mjs",
+    "store:screenshots": "playwright test -c playwright.store.config.ts",
+    "icons": "node scripts/render-icons.ts"
   },
   "dependencies": {
     "@squashflow/shared": "workspace:*",
@@ -29,7 +32,8 @@
     "permissions": [
       "activeTab",
       "scripting",
-      "storage"
+      "storage",
+      "unlimitedStorage"
     ],
     "action": {
       "default_title": "Squashflow: toggle pin mode"

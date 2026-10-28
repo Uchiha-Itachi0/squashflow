@@ -93,7 +93,8 @@ button.danger:hover { border-color: #D93F5B; color: #D93F5B; }
 .modes button[aria-pressed="true"] { background: var(--violet); color: #fff; }
 .hint { padding: 6px 10px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); }
 .list { list-style: none; margin: 0; padding: 4px 0; overflow: auto; flex: 1; }
-.list li { display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; }
+.list li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: flex-start; padding: 6px 10px; }
+.list li .details { flex-basis: 100%; min-width: 0; padding-left: 28px; display: flex; flex-direction: column; gap: 4px; }
 .list li:hover { background: #F6F5FE; }
 .badge {
   flex: none;
@@ -129,13 +130,16 @@ button.danger:hover { border-color: #D93F5B; color: #D93F5B; }
 .marker.s-approve-in-terminal, .marker.s-blocked { background: #D93F5B; }
 .marker.s-fixed { background: #1F9D55; }
 .marker.s-resolved { background: #9A97B0; }
+.keep-shot { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.shot { display: flex; gap: 6px; align-items: center; }
+.shot-tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .comment { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 .actions { display: flex; gap: 4px; flex: none; }
 .actions button { padding: 1px 6px; font-size: 12px; }
 .empty { padding: 12px 10px; color: var(--muted); }
 .panel footer { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); }
 .panel footer button { white-space: nowrap; }
-.panel footer select { flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--paper); }
+.panel footer select { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--paper); }
 .status { padding: 0 10px 8px; color: var(--violet-dark); font-size: 12px; min-height: 0; }
 .status:empty { display: none; }
 .status.error { color: #D93F5B; }

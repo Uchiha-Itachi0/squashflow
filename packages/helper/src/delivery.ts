@@ -19,6 +19,7 @@ import { TRANSCRIPT_WATCH_MAX_MS } from "./constants.js";
 import { ReplyTracker, type PinEvent, type Reply } from "./reply.js";
 import { buildMessage, digestMessage, wrapForInbox, type PinSource } from "./message.js";
 import type { PinInput } from "./schemas.js";
+import { screenshotFiles, writeScreenshotFiles, type ScreenshotFile } from "./screenshots.js";
 import type { SessionInfo } from "./sessions.js";
 import { inboxSocketPath, writeToInbox } from "./socket.js";
 import { fileSize, locateTranscript, watchTranscript, type TranscriptWatch } from "./transcript.js";
@@ -43,10 +44,17 @@ export interface Draft {
   session: SessionInfo;
   source: PinSource;
   pageUrl: string | undefined;
+  /** The pins without their screenshots' image data, which the send carries again. */
   pins: readonly PinInput[];
   message: string;
   digest: string;
   expiresAt: number;
+}
+
+/** A previewed draft whose send matched it, with the screenshots that send carried. */
+export interface VerifiedDraft {
+  draft: Draft;
+  screenshots: readonly ScreenshotFile[];
 }
 
 export interface FollowUpDraft {
@@ -75,6 +83,8 @@ export interface DeliveryOptions {
   socketDir: string;
   claudeConfigDir: string;
   senderSocketPath: string;
+  /** Where region screenshots are written; without it, pins with screenshots are refused. */
+  screenshotDir?: string;
   now?: () => number;
   pollMs?: number;
   /** Stop following a pin after this long with nothing new in its transcript. */
@@ -109,13 +119,22 @@ export class DeliveryService {
   ): Draft {
     this.dropExpiredDrafts();
     const pinId = `sf-${randomBytes(6).toString("hex")}`;
-    const message = buildMessage({ pinId, source, pageUrl, pins });
+    const message = buildMessage({
+      pinId,
+      source,
+      pageUrl,
+      pins,
+      screenshots: this.screenshotsFor(pinId, pins).map((file) => file.reference),
+    });
     const draft: Draft = {
       pinId,
       session,
       source,
       pageUrl,
-      pins,
+      // Kept for up to 10 minutes per preview, so without the images.
+      pins: pins.map(({ comment, context }) =>
+        context === undefined ? { comment } : { comment, context },
+      ),
       message,
       digest: digestMessage(message),
       expiresAt: this.now() + DRAFT_TTL_MS,
@@ -127,36 +146,64 @@ export class DeliveryService {
   /**
    * Find a previewed draft for delivery. The content is rebuilt and must hash to
    * the previewed digest, so only the exact message the user saw is delivered.
-   * The draft is consumed by a successful `deliver`.
+   * The draft is consumed by a successful `deliver`. The message names each screenshot
+   * with its hash, so the screenshots this send carries are the ones that were previewed.
    */
-  verifyDraft(pinId: string, digest: string, pageUrl: string, pins: readonly PinInput[]): Draft {
+  verifyDraft(
+    pinId: string,
+    digest: string,
+    pageUrl: string,
+    pins: readonly PinInput[],
+  ): VerifiedDraft {
     this.dropExpiredDrafts();
     const draft = this.drafts.get(pinId);
     if (!draft) {
       throw new DraftError("missing", "No preview with that pin id; preview the message again.");
     }
-    const rebuilt = buildMessage({ pinId, source: draft.source, pageUrl, pins });
+    const screenshots = this.screenshotsFor(pinId, pins);
+    const rebuilt = buildMessage({
+      pinId,
+      source: draft.source,
+      pageUrl,
+      pins,
+      screenshots: screenshots.map((file) => file.reference),
+    });
     if (digestMessage(rebuilt) !== digest || digest !== draft.digest) {
       throw new DraftError(
         "changed",
         "The message changed since it was previewed; preview it again.",
       );
     }
-    return draft;
+    return { draft, screenshots };
   }
 
-  async deliver(draft: Draft): Promise<PinRecord> {
+  private screenshotsFor(pinId: string, pins: readonly PinInput[]): ScreenshotFile[] {
+    const dir = this.options.screenshotDir;
+    if (dir !== undefined) return screenshotFiles(dir, pinId, pins);
+    if (pins.some((pin) => pin.screenshot !== undefined)) {
+      throw new Error("This helper does not accept region screenshots here.");
+    }
+    return [];
+  }
+
+  async deliver(draft: Draft, screenshots: readonly ScreenshotFile[] = []): Promise<PinRecord> {
     this.drafts.delete(draft.pinId);
     try {
-      return await this.deliverOnce(draft);
+      return await this.deliverOnce(draft, screenshots);
     } catch (error) {
       this.drafts.set(draft.pinId, draft);
       throw error;
     }
   }
 
-  private async deliverOnce(draft: Draft): Promise<PinRecord> {
+  private async deliverOnce(
+    draft: Draft,
+    screenshots: readonly ScreenshotFile[],
+  ): Promise<PinRecord> {
     const { session } = draft;
+    if (this.options.screenshotDir !== undefined) {
+      await writeScreenshotFiles(this.options.screenshotDir, draft.pinId, screenshots);
+    }
     await this.writeAndFollow(draft.pinId, session, draft.message);
     this.sessions.set(draft.pinId, session);
     const stamp = new Date(this.now()).toISOString();

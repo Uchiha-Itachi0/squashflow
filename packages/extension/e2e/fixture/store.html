@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Northwind Notes: pricing</title>
+    <!-- A plain demo page for the Web Store screenshots (store/screenshots.spec.ts). -->
+    <style>
+      body {
+        margin: 0;
+        font:
+          16px/1.5 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        color: #1f2430;
+        background: #f6f7fb;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 18px 48px;
+        background: #fff;
+        border-bottom: 1px solid #e6e8f0;
+      }
+      header strong {
+        font-size: 18px;
+      }
+      header nav {
+        display: flex;
+        gap: 20px;
+        color: #5b6275;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 48px 48px 64px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 40px;
+        letter-spacing: -0.02em;
+      }
+      .lead {
+        margin: 0 0 36px;
+        color: #5b6275;
+        font-size: 18px;
+      }
+      .plans {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+      }
+      .plan {
+        padding: 24px;
+        background: #fff;
+        border: 1px solid #e6e8f0;
+        border-radius: 14px;
+      }
+      .plan h2 {
+        margin: 0;
+        font-size: 18px;
+      }
+      .price {
+        margin: 12px 0 4px;
+        font-size: 34px;
+        font-weight: 700;
+      }
+      .plan ul {
+        padding-left: 18px;
+        color: #5b6275;
+      }
+      .plan button {
+        width: 100%;
+        padding: 10px;
+        border: 0;
+        border-radius: 8px;
+        background: #2b6cb0;
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+      }
+      .plan.featured {
+        border-color: #2b6cb0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Northwind Notes</strong>
+      <nav><span>Product</span><span>Pricing</span><span>Docs</span></nav>
+    </header>
+    <main>
+      <h1>Simple pricing for every team</h1>
+      <p class="lead">Start free. Upgrade when your notes outgrow you.</p>
+      <section class="plans">
+        <article class="plan">
+          <h2>Starter</h2>
+          <p class="price">$0</p>
+          <ul>
+            <li>3 notebooks</li>
+            <li>Basic search</li>
+          </ul>
+          <button type="button">Get started</button>
+        </article>
+        <article class="plan featured" id="pro">
+          <h2>Pro</h2>
+          <p class="price">$12</p>
+          <ul>
+            <li>Unlimited notebooks</li>
+            <li>Full-text search</li>
+          </ul>
+          <button id="buy" type="button">Buy Pro</button>
+        </article>
+        <article class="plan">
+          <h2>Team</h2>
+          <p class="price">$29</p>
+          <ul>
+            <li>Shared spaces</li>
+            <li>Admin controls</li>
+          </ul>
+          <button type="button">Contact sales</button>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

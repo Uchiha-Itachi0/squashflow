@@ -1,6 +1,19 @@
-import { CONTEXT_CLOSE, CONTEXT_OPEN, DETAIL_LEVELS, type PageContext } from "@squashflow/shared";
-import { describe, expect, it } from "vitest";
-import { buildCopyText } from "../src/copy/copy";
+import {
+  CONTEXT_CLOSE,
+  CONTEXT_OPEN,
+  DETAIL_LEVELS,
+  SCREENSHOTS_OPEN,
+  type PageContext,
+  type Screenshot,
+} from "@squashflow/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  BEHIND_BUTTON,
+  buildCopyText,
+  copyPins,
+  NO_IMAGE_CLIPBOARD,
+  ON_CLIPBOARD,
+} from "../src/copy/copy";
 import type { StoredPin } from "../src/store/pins";
 
 const hostile =
@@ -102,5 +115,103 @@ describe("buildCopyText", () => {
 
   it("refuses to copy nothing", () => {
     expect(() => buildCopyText({ pins: [], level: "compact", pageUrl: PAGE })).toThrow();
+  });
+});
+
+const screenshot: Screenshot = {
+  type: "image/png",
+  data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  width: 1,
+  height: 1,
+};
+const shot = { ...one, screenshot };
+
+describe("buildCopyText with a screenshot", () => {
+  it.each(["compact", "standard", "detailed"] as const)(
+    "leaves it out at the %s level",
+    (level) => {
+      expect(buildCopyText({ pins: [shot], level, pageUrl: PAGE })).not.toContain(SCREENSHOTS_OPEN);
+    },
+  );
+
+  it("names it at the forensic level, saying where it is", () => {
+    const base = { pins: [shot], level: "forensic" as const, pageUrl: PAGE };
+    expect(buildCopyText({ ...base, imageAttached: true })).toContain(
+      `- Pin 1, PNG 1×1 px: ${ON_CLIPBOARD}`,
+    );
+    expect(buildCopyText(base)).toContain(BEHIND_BUTTON);
+    expect(buildCopyText({ ...base, imagesSupported: false })).toContain(NO_IMAGE_CLIPBOARD);
+    expect(buildCopyText(base)).not.toContain(screenshot.data);
+  });
+
+  it("numbers screenshots by the pin's place in the copied message", () => {
+    const text = buildCopyText({ pins: [one, shot], level: "forensic", pageUrl: PAGE });
+    expect(text).toContain("- Pin 2, PNG 1×1 px:");
+    expect(text).not.toContain("- Pin 1,");
+  });
+});
+
+describe("copyPins", () => {
+  let write: ReturnType<typeof vi.fn>;
+  let writeText: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    write = vi.fn(() => Promise.resolve());
+    writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal(
+      "ClipboardItem",
+      class {
+        constructor(readonly items: Record<string, Blob>) {}
+      },
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      value: { write, writeText },
+      configurable: true,
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("puts one screenshot on the clipboard as a PNG next to the text", async () => {
+    const result = await copyPins(
+      { pins: [shot], level: "forensic", pageUrl: PAGE },
+      document.body,
+    );
+    expect(result).toEqual({ imageAttached: true, screenshots: 1 });
+    const [[items]] = write.mock.calls as [[{ items: Record<string, Blob> }[]]];
+    const item = items[0]?.items ?? {};
+    expect(Object.keys(item).sort()).toEqual(["image/png", "text/plain"]);
+    expect(await item["text/plain"]?.text()).toContain(ON_CLIPBOARD);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("copies the text alone, saying how to get the screenshot, when the clipboard refuses the image", async () => {
+    write.mockRejectedValueOnce(new Error("denied"));
+    const result = await copyPins(
+      { pins: [shot], level: "forensic", pageUrl: PAGE },
+      document.body,
+    );
+    expect(result).toEqual({ imageAttached: false, screenshots: 1 });
+    expect(writeText.mock.calls[0]?.[0]).toContain(BEHIND_BUTTON);
+  });
+
+  it("copies text only below the forensic level", async () => {
+    const result = await copyPins(
+      { pins: [shot], level: "detailed", pageUrl: PAGE },
+      document.body,
+    );
+    expect(result).toEqual({ imageAttached: false, screenshots: 0 });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("names several screenshots in the text instead of attaching one", async () => {
+    const result = await copyPins(
+      { pins: [shot, { ...two, screenshot }], level: "forensic", pageUrl: PAGE },
+      document.body,
+    );
+    expect(result).toEqual({ imageAttached: false, screenshots: 2 });
+    expect(writeText.mock.calls[0]?.[0]).toContain(BEHIND_BUTTON);
   });
 });

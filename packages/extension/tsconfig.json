@@ -13,7 +13,10 @@
     "src",
     "test",
     "e2e",
+    "store",
+    "scripts",
     "vitest.config.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.store.config.ts"
   ]
 }

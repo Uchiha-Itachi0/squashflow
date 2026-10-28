@@ -3,3 +3,4 @@ export * from "./detail.js";
 export * from "./github.js";
 export * from "./message.js";
 export * from "./schemas.js";
+export * from "./screenshot.js";

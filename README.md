@@ -5,7 +5,7 @@ Pin a comment on any website, and your own Claude Code session fixes it and open
 Squashflow lets you hover over any live or local website and pin a comment on an element, a piece of text, a dragged area, or several elements at once. The comment, along with the page context Claude needs, is delivered to the Claude Code session you already have running in your terminal. That session fixes the code, pushes a branch and opens a pull request with your own GitHub login, then replies on the pin. There is no Squashflow server in the middle: everything except GitHub runs on your own machine.
 
 > **Status: early development.**
-> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level (build step 2), pairs with the helper, lets you pick a session, previews the exact message and sends it (build step 3), shows each sent pin's status and Claude's reply, with the pull request link once it is fixed (build step 4), and asks the session to open the pull request with your own `gh` login, offering a way out when it cannot (build step 5). The dev overlay is not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper) and [Try the extension](#try-the-extension) to run them from a clone. See the [roadmap](#roadmap) for progress.
+> Two pieces work today. The local helper (build step 1) lists your running Claude Code sessions, matches them to GitHub repositories, delivers a pin into the session you choose and confirms it arrived. The Chrome extension places pins on any page, captures page context and copies pins to the clipboard at a chosen detail level (build step 2), pairs with the helper, lets you pick a session, previews the exact message and sends it (build step 3), shows each sent pin's status and Claude's reply, with the pull request link once it is fixed (build step 4), asks the session to open the pull request with your own `gh` login, offering a way out when it cannot (build step 5), and attaches a screenshot of each pin's region, with a packaged build ready for the Chrome Web Store (build step 6). The dev overlay is not built yet, so parts of this README still describe the planned design. Neither piece is published yet; see [Try the helper](#try-the-helper), [Install the extension](#install-the-extension) and [Try it end to end](#try-it-end-to-end) to run them from a clone. See the [roadmap](#roadmap) for progress.
 
 ## Contents
 
@@ -18,7 +18,9 @@ Squashflow lets you hover over any live or local website and pin a comment on an
 - [Privacy](#privacy)
 - [Requirements](#requirements)
 - [Try the helper](#try-the-helper)
+- [Install the extension](#install-the-extension)
 - [Try the extension](#try-the-extension)
+- [Try it end to end](#try-it-end-to-end)
 - [Roadmap](#roadmap)
 - [Comparison and credits](#comparison-and-credits)
 - [Contributing](#contributing)
@@ -162,6 +164,8 @@ squashflow sessions               # lists running sessions with their folder, st
 squashflow send --session <name or pid> "Make the Buy button on /pricing blue"
 ```
 
+To check the helper the way it will be published, `corepack pnpm check:pack` packs it with `pnpm pack` and runs `npx squashflow --version` from the tarball in an empty folder (it publishes nothing).
+
 `send` prints the exact message that will be delivered and asks `Send this message? [y/N]`. After you confirm, it delivers the message to that session and waits until the session's transcript shows it arrived:
 
 ```text
@@ -173,17 +177,29 @@ If the session runs in bypass-permissions mode, Claude Code holds the message an
 
 `squashflow` on its own starts the helper's local server on `http://127.0.0.1:47821` and prints a pairing code for the extension (see [Try the extension](#try-the-extension)). Add `--no-color`, or set `NO_COLOR`, for plain output.
 
-## Try the extension
+## Install the extension
 
-The extension is not in the Chrome Web Store yet. Build it from a clone (see [Try the helper](#try-the-helper) for the clone and install steps) and load it unpacked:
+The extension is not in the Chrome Web Store yet. Install it unpacked, either from the package CI builds or from your own clone.
+
+**From the store package.** Every CI run builds the exact zip that will go to the Chrome Web Store and keeps it for 30 days: open a run of the CI workflow on GitHub and download the `squashflow-extension` artifact, or build it yourself (see [Try the helper](#try-the-helper) for the clone and install steps):
 
 ```sh
-corepack pnpm build
+corepack pnpm package     # writes packages/extension/build/squashflow-<version>.zip and prints its SHA-256
 ```
 
+Chrome does not install a zip directly, so unzip it into a folder of its own (`unzip squashflow-0.1.0.zip -d squashflow`). The build is reproducible: the same commit always gives a zip with the same SHA-256.
+
+**From a clone.** `corepack pnpm build` writes the unpacked extension to `packages/extension/build/chrome-mv3-prod`.
+
+Then load it:
+
 1. Open `chrome://extensions` and turn on **Developer mode**.
-2. Click **Load unpacked** and choose `packages/extension/build/chrome-mv3-prod`.
+2. Click **Load unpacked** and choose the unzipped folder, or `packages/extension/build/chrome-mv3-prod`.
 3. Pin Squashflow to the toolbar if you like.
+
+The store listing text, permission justifications, privacy statement and screenshots live in [`packages/extension/store`](packages/extension/store/listing.md), next to the code they describe.
+
+## Try the extension
 
 On any `http` or `https` page, click the Squashflow button or press **Alt+Shift+P** to turn pin mode on (change the shortcut at `chrome://extensions/shortcuts`). While pin mode is on, clicks place pins instead of reaching the page:
 
@@ -191,7 +207,7 @@ On any `http` or `https` page, click the Squashflow button or press **Alt+Shift+
 - **Shift+click** several elements, then release Shift to pin them together.
 - Switch to **Text** and select text to pin the selection.
 
-Each pin gets a numbered marker and a comment box. The panel lists the page's pins, where you can edit, delete or copy them. Choose a detail level (compact, standard, detailed, or forensic, which has no screenshots yet) and press **Copy** on one pin or **Copy all**, then paste the text into your Claude Code session. Press **Escape** to close the comment box, and again to leave pin mode. Pins are kept in the extension's local storage, per page, until you delete them.
+Each pin gets a numbered marker and a comment box, and a screenshot of the pinned region of the tab (taken with Squashflow's own UI hidden); untick **Include screenshot** in the comment box to save the pin without it. The panel lists the page's pins, where you can edit, delete or copy them. Choose a detail level (compact, standard, detailed, or forensic, which adds the screenshot) and press **Copy** on one pin or **Copy all**, then paste the text into your Claude Code session. At forensic level, one pin's screenshot goes on the clipboard as an image along with the text (paste it into Claude Code with Ctrl+V); with several, the text says to use each pin's **Copy screenshot**. Press **Escape** to close the comment box, and again to leave pin mode. Pins are kept in the extension's local storage, per page, until you delete them.
 
 To send pins straight to a session instead of pasting them:
 
@@ -219,11 +235,25 @@ The extension asks for as little as it can:
 
 | Permission | Why |
 | --- | --- |
-| `activeTab` | Lets the extension act on the current tab only, and only after you click its button or press its shortcut. There are no host permissions: it cannot read or change any site on its own. |
+| `activeTab` | Lets the extension act on the current tab only, and only after you click its button or press its shortcut. The same grant lets it screenshot that tab's visible area for a pin's region screenshot. There are no host permissions: it cannot read or change any site on its own. |
 | `scripting` | Injects the pin mode script into that tab when you turn pin mode on. Nothing is injected into pages you have not asked for. |
-| `storage` | Keeps your pins, their status and Claude's replies, and the sites whose repository you asked it to remember, in the extension's local storage, which web pages cannot read. |
+| `storage` | Keeps your pins, their screenshots, their status and Claude's replies, and the sites whose repository you asked it to remember, in the extension's local storage, which web pages cannot read. |
+| `unlimitedStorage` | Region screenshots are kept with their pins (up to 200 KB each). Without this, local storage stops at 10 MB, and saving pins would start failing after a few dozen screenshots. It adds no install warning and gives no access to anything else. |
 
-There is no remote code: everything the extension runs ships inside it. Talking to the helper needs no extra permission: only the extension's background service worker calls it, on `127.0.0.1`, and the helper answers only the paired extension's origin. The pairing token stays in that service worker's own storage, out of reach of web pages and of the script running in the page. It never captures the values of form fields (including password and hidden fields), and every captured field is size-capped; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The pin UI runs inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool.
+There is no remote code: everything the extension runs ships inside it. Talking to the helper needs no extra permission: only the extension's background service worker calls it, on `127.0.0.1`, and the helper answers only the paired extension's origin. The pairing token stays in that service worker's own storage, out of reach of web pages and of the script running in the page. It never captures the values of form fields (including password and hidden fields) as text, and every captured field is size-capped; a region screenshot does show whatever is on screen in that region, so untick **Include screenshot** when it holds something private; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The pin UI runs inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool.
+
+## Try it end to end
+
+With a clone built (`corepack pnpm install && corepack pnpm build`) and the extension loaded:
+
+1. **Start the helper** in a terminal: `node packages/helper/dist/cli.js` (or the `squashflow` alias from [Try the helper](#try-the-helper)). It prints a pairing code.
+2. **Open Claude Code** in a clone of a GitHub repository you can push to, as you normally would.
+3. **Open a page of that project** (a local dev server or the live site) and press **Alt+Shift+P**.
+4. **Pin something**: drag an area around what should change and write what you want, for example "make this heading smaller". Keep **Include screenshot** ticked.
+5. **Pair** in the panel with the code from step 1, pick your session, and tick **Remember: this site's code is `owner/repo`**.
+6. **Send** the pin. The preview shows the exact message, including the screenshot's file path under `~/.squashflow/screenshots/` and its SHA-256; press **Send to claude@`<name>`**.
+7. **Watch the pin**: *Sent*, then *Seen by Claude* (or *Approve in terminal* in a bypass-permissions session; approve it there). Claude may ask to read the screenshot file, which is outside the project folder; allow it.
+8. **Review the pull request** linked on the pin once it shows *Fixed*, then mark the pin **Resolved**.
 
 ## Roadmap
 
@@ -234,7 +264,7 @@ The planned build order.
 - [x] 3. Session picker
 - [x] 4. Claude replies and pin status
 - [x] 5. GitHub flow (branch, pull request, blocked-access options)
-- [ ] 6. Chrome extension packaging and region screenshots
+- [x] 6. Chrome extension packaging and region screenshots
 
 ## Comparison and credits
 

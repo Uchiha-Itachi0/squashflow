@@ -1,7 +1,7 @@
 /** `squashflow` / `squashflow start`: run the helper in the foreground. */
 
 import { createInterface } from "node:readline";
-import { MAX_BODY_BYTES } from "../constants.js";
+import { MAX_BODY_BYTES, MAX_PINS_BODY_BYTES } from "../constants.js";
 import { runCommand } from "../exec.js";
 import { startServer, type HelperContext } from "../http/server.js";
 import { PairingCodes } from "../pairing.js";
@@ -26,6 +26,7 @@ export async function startCommand(term: Terminal, options: StartOptions): Promi
   const context: HelperContext = {
     port: options.port,
     maxBodyBytes: MAX_BODY_BYTES,
+    maxPinsBodyBytes: MAX_PINS_BODY_BYTES,
     auth: { tokenHash: state.pairing?.tokenHash ?? null, origin: state.pairing?.origin ?? null },
     pairing,
     savePairing: (record) => store.save({ ...state, pairing: record }),

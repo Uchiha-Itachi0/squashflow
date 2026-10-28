@@ -33,6 +33,31 @@ describe("pageKey and pinPageUrl", () => {
 });
 
 describe("PinStore", () => {
+  it("keeps a pin's screenshot through edits, and drops one that fails validation", async () => {
+    const area = memoryArea();
+    const store = new PinStore(area, PAGE);
+    const screenshot = {
+      type: "image/png" as const,
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      width: 1,
+      height: 1,
+    };
+    const pin = await store.add({ comment: "With a shot", context, screenshot });
+    await store.add({ comment: "Without", context, screenshot: undefined });
+    await store.update(pin.id, "Edited");
+    const [first, second] = await store.list();
+    expect(first?.screenshot).toEqual(screenshot);
+    expect(second && "screenshot" in second).toBe(false);
+
+    const key = pageKey(PAGE);
+    const stored = area.data[key] as Record<string, unknown>[];
+    area.data[key] = [
+      { ...stored[0], screenshot: { ...screenshot, type: "image/jpeg" } },
+      stored[1],
+    ];
+    expect((await store.list()).map((entry) => entry.comment)).toEqual(["Without"]);
+  });
+
   it("adds, lists, edits and deletes pins in order", async () => {
     let time = 1000;
     const store = new PinStore(memoryArea(), PAGE, () => time);

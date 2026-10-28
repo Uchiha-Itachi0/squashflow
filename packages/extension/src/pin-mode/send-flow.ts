@@ -174,7 +174,9 @@ export class SendFlow {
     const outgoing: OutgoingPins = {
       session: session.pid,
       pageUrl: this.hooks.pageUrl(),
-      pins: pins.map(({ comment, context }) => ({ comment, context })),
+      pins: pins.map(({ comment, context, screenshot }) =>
+        screenshot === undefined ? { comment, context } : { comment, context, screenshot },
+      ),
     };
     await this.busy(async () => {
       const reply = await this.hooks.ask({ type: "preview", outgoing });

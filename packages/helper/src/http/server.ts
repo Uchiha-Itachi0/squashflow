@@ -43,6 +43,8 @@ export interface HelperLog {
 export interface HelperContext {
   port: number;
   maxBodyBytes: number;
+  /** The larger cap for `POST /pins`, whose pins may carry region screenshots. */
+  maxPinsBodyBytes: number;
   auth: { tokenHash: string | null; origin: string | null };
   pairing: PairingCodes;
   savePairing(record: PairingRecord): Promise<void>;
@@ -111,7 +113,7 @@ async function handle(
   const early =
     checkHost(request.headers.host, context.port) ??
     checkOrigin(method, origin, allowedOrigin) ??
-    checkDeclaredSize(request.headers, context.maxBodyBytes);
+    checkDeclaredSize(request.headers, bodyCap(context, path));
   if (early) {
     fail(response, early);
     return;
@@ -133,6 +135,10 @@ async function handle(
     return;
   }
   await route(context, request, response, method, path);
+}
+
+function bodyCap(context: HelperContext, path: string): number {
+  return path === "/pins" ? context.maxPinsBodyBytes : context.maxBodyBytes;
 }
 
 async function route(
@@ -217,7 +223,7 @@ async function pins(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await readJsonBody(request, context.maxBodyBytes, pinsRequestSchema);
+  const body = await readJsonBody(request, context.maxPinsBodyBytes, pinsRequestSchema);
   if (!body.ok) {
     fail(response, body);
     return;
@@ -255,7 +261,7 @@ async function deliverPreviewed(
     return;
   }
   try {
-    const draft = context.delivery.verifyDraft(
+    const { draft, screenshots } = context.delivery.verifyDraft(
       input.pinId,
       input.digest,
       input.pageUrl,
@@ -265,7 +271,7 @@ async function deliverPreviewed(
       send(response, 409, { error: "The session changed since the preview; preview again" });
       return;
     }
-    const pin = await context.delivery.deliver({ ...draft, session });
+    const pin = await context.delivery.deliver({ ...draft, session }, screenshots);
     context.log.arrow(`claude@${session.name}  pin ${pin.number}`);
     send(response, 202, { pin });
     return;

@@ -15,7 +15,9 @@
     "test": "pnpm build:shared && pnpm -r run test",
     "test:e2e": "pnpm --filter @squashflow/extension run test:e2e",
     "lint": "pnpm build:shared && eslint . && prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "package": "pnpm --filter @squashflow/extension run package",
+    "check:pack": "node scripts/check-helper-pack.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

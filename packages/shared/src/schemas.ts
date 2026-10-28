@@ -6,6 +6,7 @@
 
 // Namespace import: Parcel (the extension bundler) mis-bundles zod's `z` re-export.
 import * as z from "zod";
+import { screenshotSchema } from "./screenshot.js";
 
 export const MAX_COMMENT_CHARS = 8000;
 export const MAX_FIELD_CHARS = 4000;
@@ -84,6 +85,8 @@ export const pageContextSchema = z.strictObject({
 export const pinSchema = z.strictObject({
   comment: z.string().trim().min(1).max(MAX_COMMENT_CHARS),
   context: pageContextSchema.optional(),
+  /** A crop of the visible tab around the pin. */
+  screenshot: screenshotSchema.optional(),
 });
 
 export type Rect = z.infer<typeof rectSchema>;
