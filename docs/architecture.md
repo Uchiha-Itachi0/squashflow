@@ -1,6 +1,6 @@
 # Squashflow architecture
 
-> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper), and the extension's pins, page context and copy (build step 2) in [`packages/extension`](../packages/extension), with the message builder they share in [`packages/shared`](../packages/shared). The sections on the helper, pairing, discovery, the message, delivery, the extension and copy describe what the code does today. Everything else (session picker, dev overlay, replies, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
+> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper), and the extension's pins, page context and copy (build step 2) and its pairing, session picker and sending (build step 3) in [`packages/extension`](../packages/extension), with the message builder and the helper's API schemas they share in [`packages/shared`](../packages/shared). The sections on the helper, pairing, discovery, the message, delivery, the extension, sending and copy describe what the code does today. Everything else (per-pin status in the browser, replies, dev overlay, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
 
 For a shorter overview, see the [README](../README.md). For the threat model and vulnerability reporting, see [SECURITY.md](../SECURITY.md).
 
@@ -90,7 +90,7 @@ CORS responses name only the paired extension origin, never `*`.
 1. On start, if there is no paired browser (or with `--pair`), the helper prints a pairing code in the terminal, such as `BGV9-7X3Y`. Pressing Enter in the helper's terminal prints a fresh code.
 2. The user enters the code in the extension, which sends it to `POST /pair`.
 3. The helper checks the code, then returns a random pairing token (32 bytes, base64url) and records the extension origin.
-4. The extension keeps the token in extension storage, which web pages cannot read.
+4. The extension keeps the token, with the helper's port, in the service worker's IndexedDB. That database belongs to the extension's own origin: web pages cannot read it, and neither can the pin mode script, which runs in the page's origin (unlike `chrome.storage.local`, which the pin mode script could read). Only the service worker calls the helper.
 
 Pairing codes are 8 characters from an alphabet without look-alike characters, single-use, expire after **5 minutes**, and allow **5 attempts**; after that the code is void and a new one must be printed in the terminal. Re-pairing replaces the old token, which is how a user revokes a browser.
 
@@ -100,8 +100,8 @@ The helper stores only the SHA-256 hash of the token, with the paired origin, in
 
 1. The helper runs `claude agents --json`, which lists running sessions with `pid`, `cwd`, `name`, `status` (`idle` or `busy`) and `sessionId`.
 2. For each folder it runs `git remote get-url origin` and normalises the result (SSH, `scp`-style, HTTPS or `git://`) to an `owner/repo` name. Remotes on other hosts keep the host, as `host/owner/repo`; anything else counts as no repository.
-3. For the page being reviewed, the extension asks for sessions. Matching uses the repository a page is known to belong to: the dev overlay reports it directly for local apps, and for live sites the user picks or remembers a site-to-repository mapping. (Planned; the helper already reports each session's repository.)
-4. If exactly one session matches, it is preselected. If several match, the user picks. If none match, the copy fallback is offered.
+3. For the page being reviewed, the extension asks for sessions. Matching uses the repository a page is known to belong to. Today that is the site-to-repository mapping the user chose to remember for the page's origin; the dev overlay will report it directly for local apps once it exists. Repository names are compared case-insensitively.
+4. If exactly one session matches, it is preselected. If several match, the user picks. If none match, or no repository is known for the site, the user picks any session or copies the pins instead.
 
 Commands are run with `execFile` and fixed argument lists, never through a shell, with the session folder as the working directory and a timeout.
 
@@ -126,7 +126,7 @@ The previewed message is the delivered message:
 
 ## Delivery and confirmation
 
-1. The helper wraps the message as `<cross-session-message from="uds:<helper socket>" from-name="squashflow">…</cross-session-message>` and writes it as one NDJSON line, `{"type":"user","message":{"role":"user","content":…}}`, to the session's inbox socket at `/tmp/cc-socks/<pid>.sock`. The helper socket named in `from` is a real socket it listens on, `/tmp/squashflow-<uid>/helper-<pid>.sock` (a short per-user path, so it never contains spaces). The session shows it as "Message from @squashflow" and treats it as a request from another session, never as the user's own typing; Claude Code's permissions still apply.
+1. The helper wraps the message as `<cross-session-message from="uds:<helper socket>" from-name="squashflow">…</cross-session-message>` and writes it as one NDJSON line, `{"type":"user","message":{"role":"user","content":…}}`, to the session's inbox socket at `/tmp/cc-socks/<pid>.sock` (`$SQUASHFLOW_INBOX_SOCKET_DIR` overrides the folder, which the browser test uses to deliver to a fake inbox). The helper socket named in `from` is a real socket it listens on, `/tmp/squashflow-<uid>/helper-<pid>.sock` (a short per-user path, so it never contains spaces). The session shows it as "Message from @squashflow" and treats it as a request from another session, never as the user's own typing; Claude Code's permissions still apply.
 2. Before writing, the helper checks the inbox path with `lstat` and refuses anything that is not a socket, is not owned by the current user, or is not mode `0600`. A symlink is refused, not followed. `--bare` sessions have no inbox socket and cannot receive pins.
 3. The pin moves to **Sent**.
 4. The socket sends no acknowledgement, so the helper watches the session's transcript, `<config>/projects/<cwd with every non-alphanumeric character as ->/<sessionId>.jsonl`, where `<config>` is `$CLAUDE_CONFIG_DIR` or `~/.claude`. It reads only lines appended after delivery and matches them on the pin id. It stops watching once the pin is Seen by Claude, or after 30 minutes (for example when the session exited or the held message was rejected).
@@ -158,7 +158,7 @@ A Manifest V3 Chrome extension built with Plasmo, in TypeScript.
 
 ### Permissions and injection
 
-The manifest asks for `activeTab`, `scripting` and `storage`, and nothing else: no host permissions, no declared content scripts, no remote code. Clicking the toolbar button (or the `Alt+Shift+P` shortcut, which triggers the same action) grants `activeTab` for that tab, and the service worker injects the pin mode script into it with `chrome.scripting.executeScript`. Pages other than `http` and `https`, and pages the browser protects, are refused with a badge on the button. Each injection toggles pin mode: the script's isolated world keeps the running instance between injections on the same page.
+The manifest asks for `activeTab`, `scripting` and `storage`, and nothing else: no host permissions, no declared content scripts, no remote code. Calls to the helper need no host permission either: the service worker's requests to `http://127.0.0.1:<port>` are cross-origin requests carrying the extension's `chrome-extension://<id>` origin, which the helper answers with CORS headers naming that origin only. Clicking the toolbar button (or the `Alt+Shift+P` shortcut, which triggers the same action) grants `activeTab` for that tab, and the service worker injects the pin mode script into it with `chrome.scripting.executeScript`. Pages other than `http` and `https`, and pages the browser protects, are refused with a badge on the button. Each injection toggles pin mode: the script's isolated world keeps the running instance between injections on the same page.
 
 ### Pin mode
 
@@ -171,7 +171,7 @@ While pin mode is on, the extension listens in the capture phase and stops the p
 | Several elements | Shift+click each one, then release Shift. |
 | Text selection | Switch the panel to Text and select text. The pin records the selected text and the element holding it. |
 
-A new pin opens a comment box; the pin is saved only when the comment is. Each pin gets a numbered marker, placed on its element if the selector still finds it and otherwise where it was captured. Escape closes the comment box, then clears a Shift selection, then leaves pin mode.
+A new pin opens a comment box; the pin is saved only when the comment is. Each pin gets a numbered marker, placed on its element if the selector still finds it and otherwise where it was captured. Escape closes the comment box or the message preview, then clears a Shift selection, then leaves pin mode.
 
 All of the UI lives in a shadow root on a `<squashflow-root>` element appended to `<html>`. Its styles live inside the shadow root, so they never reach the page, and `all: initial !important` on the host stops inherited page styles, including a page's `!important` rules, from reaching in. Keys typed in the UI are stopped at the host so they do not trigger the page's own shortcuts. The page's scripts can still observe input to in-page UI, so comments are not secret from the page.
 
@@ -197,6 +197,16 @@ Never captured: the value of any form field, typed or default (the `value` attri
 ### Storage
 
 Pins are kept in `chrome.storage.local`, which web pages cannot read, under one key per page, `pins:<origin><path>`; query strings and fragments share the page's pins. Each stored pin has its id (`sf-<12 hex>`), comment, context, page URL (without the fragment) and timestamps. A page holds at most 50 pins, the most the helper accepts in one message. Everything read back is validated, and entries that fail are dropped.
+
+### Pairing, session picker and sending
+
+The panel's **Send to Claude Code** section talks to the helper through the service worker: the pin mode script sends it a message (`chrome.runtime.sendMessage`), the service worker validates the request against a strict schema, makes the call with the stored token, and answers with the result or a failure in plain words. The pin mode script never sees the token. The helper's request and response shapes come from `@squashflow/shared`, the same schemas the helper validates with.
+
+1. **Pairing.** The section shows **Not paired**, **Paired**, or **Helper not running** (checked with `GET /health` each time pin mode opens). **Pair with helper** asks for the code `npx squashflow` prints and the helper's port (47821 unless the helper was started with `--port`). A wrong, expired or locked code is explained and nothing is stored. **Re-pair** enters a new code, which replaces the token; **Forget** deletes it. A token the helper no longer accepts (for example after another browser paired) shows as Not paired.
+2. **Session picker.** `GET /sessions` lists each session with its name, idle or busy status, repository and folder. Sessions on the repository remembered for this site come first, marked *this site*; when exactly one matches it is preselected. With a session chosen, **Remember: this site's code is `owner/repo`** saves that mapping for the page's origin in `chrome.storage.local` (key `site-repos`, at most 500 sites); unticking it forgets the site. **Refresh** asks the helper again.
+3. **Preview, then send.** **Send** on a pin, or **Send all**, calls `POST /pins` with `"preview": true` and shows the returned message, exactly as it will be delivered, in a dialog. Nothing is delivered until **Send to claude@`<name>`** is pressed; that repeats the request with the preview's `pinId` and `digest`. The panel then shows *Sent N pins to claude@`<name>`*, or the helper's refusal in plain words: the preview expired or no longer matches (preview again), the session is gone (refresh), the pins are too large, or the inbox socket was refused. Live status after Sent (Seen by Claude, Approve in terminal) and replies arrive with build step 4.
+
+When the helper is not running, not paired, or no session fits, the section says so and the Copy buttons stay available, so copy is always the fallback.
 
 ### Copy
 
@@ -231,6 +241,7 @@ Copy detail levels. Each level adds to the one before; key attributes are `id`, 
 
 - Helper state (pairing token hash, extension origin) is stored in `~/.squashflow/state.json`, readable and writable only by the user.
 - Pins are stored in the extension's local storage, per page (see [Storage](#storage)). Threads will be too.
+- The pairing token and helper port are stored in the extension service worker's IndexedDB; remembered site-to-repository mappings in the extension's local storage.
 - Nothing is sent to a Squashflow server, because there is none, and there is no telemetry.
 
 ## Minimum Claude Code version
@@ -241,13 +252,12 @@ The helper needs Claude Code **2.1.224** or later: the first release with the se
 
 1. Helper: list sessions, match repositories, send, confirm. (Done.)
 2. Pins and page context in the browser, plus copy. (Done.)
-3. Session picker.
+3. Session picker. (Done.)
 4. Claude replies and pin status.
 5. GitHub flow.
 6. Chrome extension packaging and region screenshots.
 
 ## Open questions
 
-- How live sites are mapped to repositories when there is no dev overlay.
 - How region screenshots are stored and passed to the session.
 - How `@squashflow/shared` ships with the helper on npm: published alongside it, or bundled into it.

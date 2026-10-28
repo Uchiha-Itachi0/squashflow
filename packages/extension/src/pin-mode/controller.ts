@@ -8,9 +8,11 @@ import type { DetailLevel, Rect } from "@squashflow/shared";
 import { capturePin, pageRect, type PinTarget } from "../capture/context";
 import { DRAG_THRESHOLD_PX, HOST_TAG } from "../constants";
 import { buildCopyText, writeClipboard } from "../copy/copy";
+import { askWorker, type AskWorker } from "../helper/messages";
 import { pinPageUrl, type PinStore, type StoredPin } from "../store/pins";
 import type { SquishMood } from "../ui/squish";
 import { PinView, type PinModeKind } from "../ui/view";
+import { SendFlow } from "./send-flow";
 
 const MOOD_RESET_MS = 2500;
 const MAX_AREA_ELEMENTS = 20;
@@ -32,11 +34,23 @@ export class PinMode {
   private mood: SquishMood = "waiting";
   private moodTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly listeners: [string, EventListener, Window | Document][] = [];
+  private readonly send: SendFlow;
 
   constructor(
     private readonly store: PinStore,
     private readonly onStop: () => void,
-  ) {}
+    ask: AskWorker = askWorker,
+  ) {
+    this.send = new SendFlow({
+      ask,
+      pageUrl: () => pinPageUrl(location.href),
+      onChange: () => this.render(),
+      report: (text, outcome) => {
+        this.setStatus(text, outcome === "error");
+        this.setMood(outcome === "error" ? "blocked" : "squashed");
+      },
+    });
+  }
 
   async start(): Promise<void> {
     this.listen(window, "mousemove", (event) => this.onMove(event as MouseEvent));
@@ -47,6 +61,7 @@ export class PinMode {
     this.listen(window, "keyup", (event) => this.onKeyUp(event as KeyboardEvent));
     this.listen(window, "resize", () => this.renderMarkers());
     await this.reload();
+    await this.send.start();
   }
 
   stop(): void {
@@ -114,6 +129,7 @@ export class PinMode {
     if (event.key !== "Escape") return;
     block(event);
     if (this.view.composing) this.view.closeComposer();
+    else if (this.send.state.preview !== null) this.send.cancelPreview();
     else if (this.selection.length > 0) this.setSelection([]);
     else this.stop();
   }
@@ -245,6 +261,12 @@ export class PinMode {
     });
   }
 
+  // ---- send ----
+
+  private sendPins(pins: readonly StoredPin[]): void {
+    void this.send.preview(pins);
+  }
+
   // ---- rendering ----
 
   private async reload(): Promise<void> {
@@ -272,12 +294,40 @@ export class PinMode {
         this.level = level;
         this.render();
       },
+      send: {
+        state: this.send.state,
+        target: this.send.target,
+        handlers: {
+          onOpenPairing: () => this.send.openPairing(),
+          onClosePairing: () => this.send.closePairing(),
+          onPair: (code, port) => void this.send.pair(code, port),
+          onForget: () => void this.send.forget(),
+          onRetry: () => void this.send.start(),
+          onRefresh: () => void this.send.refresh(),
+          onSelect: (pid) => this.send.select(pid),
+          onRemember: (remember) => void this.send.rememberSite(remember),
+        },
+      },
+      canSend: this.send.target !== null,
       onCopy: (id) => this.copy(this.pins.filter((pin) => pin.id === id)),
       onCopyAll: () => this.copy(this.pins),
+      onSend: (id) => this.sendPins(this.pins.filter((pin) => pin.id === id)),
+      onSendAll: () => this.sendPins(this.pins),
       onEdit: (id) => this.edit(id),
       onDelete: (id) => this.remove(id),
       onClose: () => this.stop(),
     });
+    const { preview, busy } = this.send.state;
+    this.view.renderPreview(
+      preview === null
+        ? null
+        : {
+            preview,
+            busy,
+            onConfirm: () => void this.send.confirm(),
+            onCancel: () => this.send.cancelPreview(),
+          },
+    );
     this.renderMarkers();
   }
 

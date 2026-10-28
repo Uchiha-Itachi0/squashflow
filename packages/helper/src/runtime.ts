@@ -1,9 +1,8 @@
 /** Shared wiring for the commands that deliver pins. */
 
 import { join } from "node:path";
-import { DEFAULT_INBOX_SOCKET_DIR } from "./constants.js";
 import { DeliveryService } from "./delivery.js";
-import { openSenderSocket, type SenderSocket } from "./socket.js";
+import { inboxSocketDir, openSenderSocket, type SenderSocket } from "./socket.js";
 import { claudeConfigDir } from "./transcript.js";
 
 export interface DeliveryRuntime {
@@ -23,7 +22,7 @@ export function senderSocketDir(uid: number | undefined = process.getuid?.()): s
 export async function openDeliveryRuntime(): Promise<DeliveryRuntime> {
   const sender = await openSenderSocket(senderSocketDir());
   const delivery = new DeliveryService({
-    socketDir: DEFAULT_INBOX_SOCKET_DIR,
+    socketDir: inboxSocketDir(),
     claudeConfigDir: claudeConfigDir(),
     senderSocketPath: sender.path,
   });

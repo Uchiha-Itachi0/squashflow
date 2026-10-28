@@ -5,6 +5,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import type { PinRecord, PinStatus } from "@squashflow/shared";
 import { TRANSCRIPT_WATCH_MAX_MS } from "./constants.js";
 import { buildMessage, digestMessage, wrapForInbox, type PinSource } from "./message.js";
 import type { PinInput } from "./schemas.js";
@@ -20,7 +21,7 @@ import {
 
 const DRAFT_TTL_MS = 10 * 60 * 1000;
 
-export type PinStatus = "sent" | "approve-in-terminal" | "seen";
+export type { PinRecord, PinStatus } from "@squashflow/shared";
 
 export const STATUS_LABELS: Record<PinStatus, string> = {
   sent: "Sent",
@@ -37,17 +38,6 @@ export interface Draft {
   message: string;
   digest: string;
   expiresAt: number;
-}
-
-export interface PinRecord {
-  id: string;
-  number: number;
-  sessionPid: number;
-  sessionName: string;
-  status: PinStatus;
-  statusLabel: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export type DraftErrorReason = "missing" | "changed" | "no-session-id";

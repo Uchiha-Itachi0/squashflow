@@ -1,10 +1,14 @@
 /**
  * Service worker. Pin mode is injected only into the tab the user acts on, using the
  * activeTab grant from the toolbar click or keyboard shortcut; there are no host
- * permissions and no content scripts declared for any site.
+ * permissions and no content scripts declared for any site. Every call to the local
+ * helper is made from here, never from the pin mode script or the page.
  */
 
 import pinModeUrl from "url:./inject/pin-mode.ts";
+import { ConnectionStore, indexedDbArea } from "./helper/connection";
+import { HelperService } from "./helper/service";
+import { SiteRepoStore } from "./helper/sites";
 
 /**
  * Plasmo emits the pin mode script at the extension root under a hashed name. Only the
@@ -12,8 +16,21 @@ import pinModeUrl from "url:./inject/pin-mode.ts";
  */
 const PIN_MODE_FILE = pinModeUrl.slice(pinModeUrl.lastIndexOf("/") + 1);
 
+const helper = new HelperService({
+  fetch: (url, init) => fetch(url, init),
+  connections: new ConnectionStore(indexedDbArea()),
+  sites: new SiteRepoStore(chrome.storage.local),
+});
+
 chrome.action.onClicked.addListener((tab) => {
   void togglePinMode(tab);
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Only this extension's own pin mode script; there is no externally_connectable.
+  if (sender.id !== chrome.runtime.id) return false;
+  void helper.handle(message).then(sendResponse);
+  return true;
 });
 
 async function togglePinMode(tab: chrome.tabs.Tab): Promise<void> {

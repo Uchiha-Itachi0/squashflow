@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "displayName": "Squashflow",
-  "description": "Pin comments on any page and copy them, with page context, for your Claude Code session.",
+  "description": "Pin comments on any page and send them, with page context, to your Claude Code session.",
   "license": "MIT",
   "type": "module",
   "scripts": {

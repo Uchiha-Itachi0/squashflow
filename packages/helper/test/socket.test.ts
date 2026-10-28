@@ -1,8 +1,24 @@
 import { symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkInboxSocket, SocketRefusedError, writeToInbox } from "../src/socket.js";
+import { DEFAULT_INBOX_SOCKET_DIR } from "../src/constants.js";
+import {
+  checkInboxSocket,
+  inboxSocketDir,
+  SocketRefusedError,
+  writeToInbox,
+} from "../src/socket.js";
 import { fakeInbox, tempDir } from "./helpers.js";
+
+describe("inboxSocketDir", () => {
+  it("uses the Claude Code socket folder unless SQUASHFLOW_INBOX_SOCKET_DIR is set", () => {
+    expect(inboxSocketDir({})).toBe(DEFAULT_INBOX_SOCKET_DIR);
+    expect(inboxSocketDir({ SQUASHFLOW_INBOX_SOCKET_DIR: "" })).toBe(DEFAULT_INBOX_SOCKET_DIR);
+    expect(inboxSocketDir({ SQUASHFLOW_INBOX_SOCKET_DIR: "/tmp/fake-socks" })).toBe(
+      "/tmp/fake-socks",
+    );
+  });
+});
 
 describe("inbox socket checks", () => {
   let dir: Awaited<ReturnType<typeof tempDir>>;

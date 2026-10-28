@@ -3,12 +3,22 @@
 import { lstat, mkdir, chmod, rm } from "node:fs/promises";
 import { createConnection, createServer, type Server } from "node:net";
 import { join } from "node:path";
+import { DEFAULT_INBOX_SOCKET_DIR } from "./constants.js";
 
 const OWNER_ONLY_MODE = 0o600;
 const SOCKET_WRITE_TIMEOUT_MS = 5000;
 
 export class SocketRefusedError extends Error {
   override readonly name = "SocketRefusedError";
+}
+
+/**
+ * Where session inbox sockets are looked up. `SQUASHFLOW_INBOX_SOCKET_DIR` overrides it,
+ * so tests can deliver to a fake inbox without touching the real socket folder.
+ */
+export function inboxSocketDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.SQUASHFLOW_INBOX_SOCKET_DIR;
+  return override !== undefined && override !== "" ? override : DEFAULT_INBOX_SOCKET_DIR;
 }
 
 export function inboxSocketPath(socketDir: string, pid: number): string {

@@ -1,9 +1,10 @@
 /** `squashflow doctor`: check everything the helper depends on. */
 
 import { readdir, stat } from "node:fs/promises";
-import { DEFAULT_INBOX_SOCKET_DIR, MIN_CLAUDE_CODE_VERSION } from "./constants.js";
+import { MIN_CLAUDE_CODE_VERSION } from "./constants.js";
 import type { RunCommand } from "./exec.js";
 import { listSessions } from "./sessions.js";
+import { inboxSocketDir } from "./socket.js";
 import { meetsMinimum, parseVersion } from "./version.js";
 
 export const MIN_NODE_VERSION = "22.12.0";
@@ -23,7 +24,7 @@ export interface DoctorOptions {
 export async function runDoctor({
   run,
   nodeVersion = process.versions.node,
-  socketDir = DEFAULT_INBOX_SOCKET_DIR,
+  socketDir = inboxSocketDir(),
 }: DoctorOptions): Promise<DoctorCheck[]> {
   return [
     checkNode(nodeVersion),

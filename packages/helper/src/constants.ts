@@ -4,7 +4,7 @@ export const HELPER_VERSION = "0.1.0";
 
 /** The only address the helper ever binds. */
 export const LOOPBACK_HOST = "127.0.0.1";
-export const DEFAULT_PORT = 47821;
+export { DEFAULT_HELPER_PORT as DEFAULT_PORT } from "@squashflow/shared";
 
 /** Request bodies above this many bytes are rejected before they are read in full. */
 export const MAX_BODY_BYTES = 64 * 1024;
