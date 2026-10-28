@@ -1,12 +1,12 @@
 # Contributing to Squashflow
 
-Thanks for your interest in Squashflow. The project is in early development: only the local helper exists so far, so the most useful contributions right now are feedback on the [design](docs/architecture.md) and the [security model](SECURITY.md), and improvements to the helper. Open an issue to start a discussion.
+Thanks for your interest in Squashflow. The project is in early development: the local helper and the first part of the extension (pins, page context and copy) exist so far, so the most useful contributions right now are feedback on the [design](docs/architecture.md) and the [security model](SECURITY.md), and improvements to those two. Open an issue to start a discussion.
 
 By taking part, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
-Squashflow is a TypeScript monorepo using pnpm workspaces. Packages live in `packages/`; today that is `packages/helper` (published name `squashflow`).
+Squashflow is a TypeScript monorepo using pnpm workspaces. Packages live in `packages/`: `packages/helper` (published name `squashflow`), `packages/extension` (the Chrome extension, built with Plasmo) and `packages/shared` (pin schemas and the message builder both use).
 
 - Node.js 22.12 or later for development (`.nvmrc` pins the current LTS). The helper itself runs on Node.js 22.12 or later.
 - pnpm, at the version in the root `package.json` `packageManager` field. With Corepack: `corepack pnpm <command>`.
@@ -17,6 +17,8 @@ corepack pnpm lint        # eslint and prettier
 corepack pnpm typecheck
 corepack pnpm test        # vitest
 corepack pnpm build
+corepack pnpm --filter @squashflow/extension exec playwright install chromium   # once
+corepack pnpm test:e2e    # Playwright, against the built extension
 node packages/helper/dist/cli.js doctor
 ```
 

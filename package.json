@@ -10,9 +10,11 @@
   },
   "scripts": {
     "build": "pnpm -r run build",
-    "typecheck": "pnpm -r run typecheck",
-    "test": "pnpm -r run test",
-    "lint": "eslint . && prettier --check .",
+    "build:shared": "pnpm --filter @squashflow/shared run build",
+    "typecheck": "pnpm build:shared && pnpm -r run typecheck",
+    "test": "pnpm build:shared && pnpm -r run test",
+    "test:e2e": "pnpm --filter @squashflow/extension run test:e2e",
+    "lint": "pnpm build:shared && eslint . && prettier --check .",
     "format": "prettier --write ."
   },
   "devDependencies": {

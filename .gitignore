@@ -18,6 +18,7 @@ out/
 .next/
 .vite/
 .cache/
+.plasmo/
 
 # Packed artifacts
 *.tgz
