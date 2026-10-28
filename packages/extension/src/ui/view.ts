@@ -1,106 +1,75 @@
 /**
- * The pin UI: a host element with a shadow root holding the overlay layer (hover box,
- * selection, dragged area, markers, comment box) and the fixed panel.
+ * What pin mode shows on the page (U1 on the design canvas): a host element with a
+ * shadow root holding the overlay layer (hover box, selection, dragged area, numbered
+ * markers coloured by status, the small comment box), the dark toolbar and a one-line
+ * status. Everything else lives in the side panel.
  * Rendering only; the pin mode controller owns state and decides what to show.
  */
 
-import { DETAIL_LEVELS, type DetailLevel, type Rect } from "@squashflow/shared";
+import type { Rect } from "@squashflow/shared";
 import { HOST_TAG } from "../constants";
-import { h, placeBox } from "./dom";
-import { renderMarkdown } from "./markdown";
-import {
-  pairingFields,
-  previewDialog,
-  sendSection,
-  type PairingFields,
-  type PreviewProps,
-  type SendSectionProps,
-} from "./send-view";
+import type { ToolbarTarget } from "../panel/protocol";
+import type { SendMode } from "../settings";
 import type { ShownStatus } from "../status/pin-status";
-import { gitHubOptions, type GitHubBlockView, type GitHubChoice } from "./github-view";
-import { squishSvg, type SquishMood } from "./squish";
+import { h, placeBox } from "./dom";
+import { icon } from "./icons";
 import { PIN_UI_CSS } from "./styles";
 
-export type PinModeKind = "element" | "text";
-
-/** A sent pin's status as the panel and its marker show it. */
-export interface PinStatusView {
-  status: ShownStatus;
-  label: string;
-  mood: SquishMood;
-  /** Claude's latest reply: untrusted, always rendered as plain text. */
-  reply: { text: string; truncated: boolean } | null;
-  pullRequestUrl: string | null;
-  /** Set while the pin is Blocked: GitHub access, to offer the ways out. */
-  github: GitHubBlockView | null;
-}
-
-export interface PanelPin {
-  id: string;
-  number: number;
-  comment: string;
-  /** Whether the pin has a region screenshot. */
-  hasScreenshot: boolean;
-  status: PinStatusView | null;
-}
+export type PinModeKind = "element" | "text" | "area" | "multi";
 
 export interface MarkerView {
   id: string;
   number: number;
   at: Rect;
-  status: PinStatusView | null;
+  /** Null while the pin is a draft. */
+  status: { status: ShownStatus; label: string } | null;
 }
 
-export interface PanelProps {
-  pins: readonly PanelPin[];
+export interface ToolbarProps {
   mode: PinModeKind;
-  level: DetailLevel;
-  status: { text: string; error: boolean } | null;
-  mood: SquishMood;
+  /** What the side panel says about where pins go; null while no panel is connected. */
+  target: ToolbarTarget | null;
+  sendMode: SendMode;
+  /** Pins on the page not sent yet. */
+  drafts: number;
+  /** Elements picked in Multi mode, waiting to become one pin. */
+  selected: number;
   onMode: (mode: PinModeKind) => void;
-  onLevel: (level: DetailLevel) => void;
-  /** The Claude Code section, without the pairing inputs the view keeps itself. */
-  send: Omit<SendSectionProps, "fields">;
-  /** Whether a session is chosen, so pins can be sent. */
-  canSend: boolean;
-  onCopy: (id: string) => void;
-  onCopyAll: () => void;
-  onCopyScreenshot: (id: string) => void;
-  onSend: (id: string) => void;
-  onSendAll: () => void;
-  onEdit: (id: string) => void;
-  onDelete: (id: string) => void;
-  onResolve: (id: string, resolved: boolean) => void;
-  onGitHub: (id: string, choice: GitHubChoice) => void;
+  onSendMode: (mode: SendMode) => void;
+  onSession: () => void;
+  onPinSelection: () => void;
+  onCopy: () => void;
+  onGo: () => void;
   onClose: () => void;
 }
 
 export interface ComposerProps {
   anchor: Rect;
-  heading: string;
-  initial: string;
-  editing: boolean;
-  /** Offer to keep the region screenshot taken for a new pin (ticked by default). */
+  number: number;
+  /** What was pinned: a selector, or a short description. */
+  where: string;
+  /** What happens on Save, e.g. "Batch on · sends with Go". */
+  hint: string;
+  /** Offer to keep the region screenshot taken for the pin (ticked by default). */
   screenshot: boolean;
   /** `includeScreenshot` is false when the user unticked it, or none was offered. */
   onSave: (comment: string, includeScreenshot: boolean) => void;
   onCancel: () => void;
-  onDelete: () => void;
 }
 
-const HINTS: Record<PinModeKind, string> = {
-  element:
-    "Click an element to pin it. Drag to pin an area. Shift+click several, then release Shift.",
-  text: "Select text to pin it.",
-};
-const LEVEL_LABELS: Record<DetailLevel, string> = {
-  compact: "Compact",
-  standard: "Standard",
-  detailed: "Detailed",
-  forensic: "Forensic (with screenshots)",
-};
-const COMPOSER_WIDTH = 260;
-const COMPOSER_GAP = 8;
+const COMPOSER_WIDTH = 330;
+const COMPOSER_GAP = 10;
+/** Half a marker and a little more: how far its centre stays from the page's edges. */
+const MARKER_INSET = 18;
+/** The toolbar's height and margin, which the comment box stays above. */
+const TOOLBAR_CLEARANCE = 84;
+
+const MODES: readonly [PinModeKind, string, string][] = [
+  ["element", "Element", "Click an element to pin it. Drag to pin an area."],
+  ["text", "Text", "Select text to pin it."],
+  ["area", "Area", "Drag a box around what you want to pin."],
+  ["multi", "Multi", "Click several elements, then pin them together."],
+];
 
 export class PinView {
   readonly host: HTMLElement;
@@ -109,9 +78,8 @@ export class PinView {
   private readonly areaBox: HTMLElement;
   private readonly selectionLayer: HTMLElement;
   private readonly markerLayer: HTMLElement;
-  private readonly panelSlot: HTMLElement;
-  private readonly previewSlot: HTMLElement;
-  private readonly pairing: PairingFields = pairingFields();
+  private readonly toolbarSlot: HTMLElement;
+  private readonly toast: HTMLElement;
   private composer: HTMLElement | null = null;
 
   constructor() {
@@ -128,9 +96,9 @@ export class PinView {
       this.selectionLayer,
       this.markerLayer,
     ]);
-    this.panelSlot = h("div");
-    this.previewSlot = h("div");
-    shadow.append(h("style", { text: PIN_UI_CSS }), this.overlay, this.panelSlot, this.previewSlot);
+    this.toolbarSlot = h("div");
+    this.toast = h("div", { className: "toast", attrs: { role: "status" } });
+    shadow.append(h("style", { text: PIN_UI_CSS }), this.overlay, this.toast, this.toolbarSlot);
     this.showHover(null);
     this.showArea(null);
     // Keys typed in the pin UI must not trigger the page's own shortcuts.
@@ -147,7 +115,7 @@ export class PinView {
    * shows only the page.
    */
   async hiddenWhile<T>(action: () => Promise<T>): Promise<T> {
-    const parts = [this.overlay, this.panelSlot, this.previewSlot];
+    const parts = [this.overlay, this.toolbarSlot, this.toast];
     for (const part of parts) part.style.visibility = "hidden";
     try {
       await nextPaint();
@@ -184,51 +152,59 @@ export class PinView {
     );
   }
 
+  showStatus(status: { text: string; error: boolean } | null): void {
+    this.toast.textContent = status?.text ?? "";
+    this.toast.className = status?.error === true ? "toast error" : "toast";
+  }
+
   renderMarkers(markers: readonly MarkerView[], onOpen: (id: string) => void): void {
     this.markerLayer.replaceChildren(
       ...markers.map(({ id, number, at, status }) => {
-        const marker = h("button", {
-          className: status === null ? "marker" : `marker s-${status.status}`,
-          text: String(number),
-          title: status === null ? `Pin ${number}` : `Pin ${number}: ${status.label}`,
-          attrs: {
-            "data-pin": id,
-            "aria-label": `Edit pin ${number}`,
-            ...(status === null ? {} : { "data-status": status.status }),
+        const done = status?.status === "fixed" || status?.status === "resolved";
+        const label = `Pin ${number}: ${status === null ? "draft" : status.label}`;
+        const marker = h(
+          "button",
+          {
+            className: status === null ? "marker" : `marker s-${status.status}`,
+            title: label,
+            attrs: {
+              "data-pin": id,
+              "aria-label": label,
+              ...(status === null ? {} : { "data-status": status.status }),
+            },
+            on: { click: () => onOpen(id) },
           },
-          on: { click: () => onOpen(id) },
-        });
-        marker.style.left = `${at.x}px`;
-        marker.style.top = `${at.y}px`;
+          [done ? icon("check", 3) : String(number)],
+        );
+        // At the element's top right corner, kept inside the page for full-width elements.
+        const maxX = document.documentElement.scrollWidth - MARKER_INSET;
+        marker.style.left = `${Math.max(MARKER_INSET, Math.min(at.x + at.width, maxX))}px`;
+        marker.style.top = `${Math.max(MARKER_INSET, at.y)}px`;
         return marker;
       }),
     );
   }
 
-  renderPanel(props: PanelProps): void {
-    this.panelSlot.replaceChildren(panel(props, this.pairing));
-  }
-
-  /** The message preview dialog, or nothing. */
-  renderPreview(props: PreviewProps | null): void {
-    this.previewSlot.replaceChildren(...(props === null ? [] : [previewDialog(props)]));
+  renderToolbar(props: ToolbarProps): void {
+    this.toolbarSlot.replaceChildren(toolbar(props));
   }
 
   openComposer(props: ComposerProps): void {
     this.closeComposer();
     const field = h("textarea", {
       attrs: {
+        id: "squashflow-comment",
         "aria-label": "Comment",
         placeholder: "What should change here?",
         maxlength: "8000",
       },
     });
-    field.value = props.initial;
     const keep = h("input", { attrs: { type: "checkbox" } });
     keep.checked = true;
     const save = (): void => {
-      if (field.value.trim() !== "")
+      if (field.value.trim() !== "") {
         props.onSave(field.value.trim(), props.screenshot && keep.checked);
+      }
     };
     field.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -236,27 +212,39 @@ export class PinView {
         save();
       }
     });
-    const composer = h("div", { className: "composer", attrs: { role: "dialog" } }, [
-      h("div", { className: "what", text: props.heading }),
-      field,
-      props.screenshot &&
-        h(
-          "label",
-          { className: "keep-shot", title: "A screenshot of this region, as it shows on screen" },
-          [keep, "Include screenshot"],
-        ),
-      h("div", { className: "row" }, [
-        props.editing &&
-          h("button", { className: "danger", text: "Delete", on: { click: props.onDelete } }),
-        h("span", { className: "spacer" }),
-        h("button", { text: "Cancel", on: { click: props.onCancel } }),
-        h("button", { className: "primary", text: "Save", on: { click: save } }),
-      ]),
-    ]);
+    const composer = h(
+      "div",
+      { className: "composer", attrs: { role: "dialog", "aria-label": `Pin ${props.number}` } },
+      [
+        h("div", { className: "head" }, [
+          h("b", { text: `Pin ${props.number}` }),
+          h("span", { className: "where", text: props.where, title: props.where }),
+        ]),
+        field,
+        props.screenshot &&
+          h(
+            "label",
+            { className: "shot", title: "A screenshot of this region, as it shows on screen" },
+            [keep, "Attach a screenshot"],
+          ),
+        h("div", { className: "row" }, [
+          h("span", { className: "hint", text: props.hint }),
+          h("span", { className: "spacer" }),
+          h("button", { className: "btn", text: "Cancel", on: { click: props.onCancel } }),
+          h("button", { className: "btn primary", text: "Save pin", on: { click: save } }),
+        ]),
+      ],
+    );
     const maxX = document.documentElement.scrollWidth - COMPOSER_WIDTH - COMPOSER_GAP;
-    composer.style.left = `${Math.max(COMPOSER_GAP, Math.min(props.anchor.x, maxX))}px`;
-    composer.style.top = `${props.anchor.y + props.anchor.height + COMPOSER_GAP}px`;
+    const right = props.anchor.x + props.anchor.width + COMPOSER_GAP;
+    const left = right <= maxX ? right : Math.max(COMPOSER_GAP, Math.min(props.anchor.x, maxX));
+    const top =
+      right <= maxX ? props.anchor.y : props.anchor.y + props.anchor.height + COMPOSER_GAP;
+    composer.style.left = `${left}px`;
     this.overlay.append(composer);
+    // Keep it in view and clear of the toolbar at the bottom of the window.
+    const lowest = window.scrollY + window.innerHeight - composer.offsetHeight - TOOLBAR_CLEARANCE;
+    composer.style.top = `${Math.max(window.scrollY + COMPOSER_GAP, Math.min(top, lowest))}px`;
     this.composer = composer;
     field.focus({ preventScroll: true });
   }
@@ -271,178 +259,107 @@ export class PinView {
   }
 }
 
-function panel(props: PanelProps, fields: PairingFields): HTMLElement {
-  const squish = h("div", { className: "squish" });
-  squish.innerHTML = squishSvg(props.mood);
-  const modeButton = (mode: PinModeKind, label: string): HTMLButtonElement =>
+function toolbar(props: ToolbarProps): HTMLElement {
+  const modeButton = ([mode, label, hint]: (typeof MODES)[number]): HTMLButtonElement =>
+    h(
+      "button",
+      {
+        className: "tb",
+        title: hint,
+        attrs: { type: "button", "aria-pressed": String(props.mode === mode) },
+        on: { click: () => props.onMode(mode) },
+      },
+      [icon(mode), label],
+    );
+  const sendModeButton = (mode: SendMode, label: string): HTMLButtonElement =>
     h("button", {
+      className: "tb",
       text: label,
-      attrs: { "aria-pressed": String(props.mode === mode) },
-      on: { click: () => props.onMode(mode) },
+      attrs: { type: "button", role: "radio", "aria-checked": String(props.sendMode === mode) },
+      on: { click: () => props.onSendMode(mode) },
     });
-  const level: HTMLSelectElement = h(
-    "select",
-    {
-      attrs: { "aria-label": "Copy detail level" },
-      on: { change: () => props.onLevel(readLevel(level.value)) },
-    },
-    DETAIL_LEVELS.map((value) => {
-      const option = h("option", { text: LEVEL_LABELS[value], attrs: { value } });
-      option.selected = value === props.level;
-      return option;
-    }),
-  );
-  return h("section", { className: "panel", attrs: { "aria-label": "Squashflow pins" } }, [
-    h("header", {}, [
-      squish,
-      h("span", { className: "title", text: "Squashflow" }),
-      h("div", { className: "modes" }, [
-        modeButton("element", "Element"),
-        modeButton("text", "Text"),
-      ]),
-      h("button", {
-        text: "×",
-        title: "Exit pin mode (Esc)",
-        attrs: { "aria-label": "Exit pin mode" },
-        on: { click: props.onClose },
-      }),
-    ]),
-    h("div", { className: "hint", text: HINTS[props.mode] }),
-    props.pins.length === 0
-      ? h("div", { className: "empty", text: "No pins on this page yet." })
-      : h(
-          "ol",
-          { className: "list" },
-          props.pins.map((pin) => pinRow(pin, props)),
-        ),
-    h("div", {
-      className: `status${props.status?.error === true ? " error" : ""}`,
-      text: props.status?.text ?? "",
-      attrs: { role: "status" },
-    }),
-    sendSection({ ...props.send, fields }),
-    h("footer", {}, [
-      level,
-      h("button", {
-        className: props.canSend ? "" : "primary",
-        text: "Copy all",
-        attrs: props.pins.length === 0 ? { disabled: "" } : {},
-        on: { click: props.onCopyAll },
-      }),
-      props.canSend &&
+  const copyOnly = props.target?.copyOnly === true;
+  return h(
+    "div",
+    { className: "toolbar", attrs: { role: "toolbar", "aria-label": "Squashflow toolbar" } },
+    [
+      ...MODES.map(modeButton),
+      props.mode === "multi" &&
         h("button", {
-          className: "primary",
-          text: "Send all",
-          attrs: props.pins.length === 0 || props.send.state.busy ? { disabled: "" } : {},
-          on: { click: props.onSendAll },
+          className: "tb pick",
+          text: `Pin ${props.selected} selected`,
+          attrs: { type: "button", ...(props.selected === 0 ? { disabled: "" } : {}) },
+          on: { click: props.onPinSelection },
         }),
-    ]),
-  ]);
-}
-
-function pinRow(pin: PanelPin, props: PanelProps): HTMLLIElement {
-  const { status } = pin;
-  return h("li", { attrs: { "data-pin": pin.id } }, [
-    h("span", { className: "badge", text: String(pin.number) }),
-    h("div", { className: "body" }, [
-      h("span", { className: "comment", text: pin.comment, title: pin.comment }),
-    ]),
-    h("span", { className: "actions" }, [
-      props.canSend &&
-        h("button", {
-          text: "Send",
-          attrs: { "aria-label": `Send pin ${pin.number}` },
-          on: { click: () => props.onSend(pin.id) },
-        }),
-      h("button", {
-        text: "Copy",
-        attrs: { "aria-label": `Copy pin ${pin.number}` },
-        on: { click: () => props.onCopy(pin.id) },
-      }),
-      h("button", {
-        text: "Edit",
-        attrs: { "aria-label": `Edit pin ${pin.number}` },
-        on: { click: () => props.onEdit(pin.id) },
-      }),
-      h("button", {
-        className: "danger",
-        text: "Delete",
-        attrs: { "aria-label": `Delete pin ${pin.number}` },
-        on: { click: () => props.onDelete(pin.id) },
-      }),
-    ]),
-    (pin.hasScreenshot || status !== null) &&
-      h("div", { className: "details" }, [
-        pin.hasScreenshot &&
-          h("div", { className: "shot" }, [
-            h("span", { className: "shot-tag", text: "Screenshot" }),
-            h("button", {
-              className: "link",
-              text: "Copy screenshot",
-              attrs: { "aria-label": `Copy screenshot of pin ${pin.number}` },
-              on: { click: () => props.onCopyScreenshot(pin.id) },
-            }),
-          ]),
-        status !== null && pinStatus(pin, status, props),
-      ]),
-  ]);
-}
-
-/**
- * The status chip, Claude's reply (safe markdown, see markdown.ts), the pull request link, Resolve or Reopen,
- * and the ways out of Blocked: GitHub access.
- */
-function pinStatus(pin: PanelPin, status: PinStatusView, props: PanelProps): HTMLElement {
-  const mood = h("span", { className: "mini-squish" });
-  // Constant markup chosen by mood; no reply or page text goes into it.
-  mood.innerHTML = squishSvg(status.mood);
-  const resolved = status.status === "resolved";
-  return h("div", { className: "pin-status" }, [
-    h("div", { className: "row" }, [
-      h("span", { className: `chip pin-state s-${status.status}` }, [mood, status.label]),
-      status.pullRequestUrl !== null &&
-        h("a", {
-          className: "pr-link",
-          text: pullRequestLabel(status.pullRequestUrl),
-          attrs: {
-            href: status.pullRequestUrl,
-            target: "_blank",
-            rel: "noopener noreferrer",
-            "aria-label": `Pull request for pin ${pin.number}`,
-          },
-        }),
+      h("span", { className: "sep", attrs: { "aria-hidden": "true" } }),
+      sessionChip(props),
+      !copyOnly &&
+        h("span", { className: "seg", attrs: { role: "radiogroup", "aria-label": "Send mode" } }, [
+          sendModeButton("now", "Send now"),
+          sendModeButton("batch", "Batch"),
+        ]),
       h("span", { className: "spacer" }),
-      h("button", {
-        className: "link",
-        text: resolved ? "Reopen" : "Resolve",
-        attrs: { "aria-label": `${resolved ? "Reopen" : "Resolve"} pin ${pin.number}` },
-        on: { click: () => props.onResolve(pin.id, !resolved) },
-      }),
-    ]),
-    status.reply !== null &&
       h(
-        "div",
-        { className: "reply", attrs: { "aria-label": `Claude's reply to pin ${pin.number}` } },
-        [
-          ...renderMarkdown(status.reply.text),
-          status.reply.truncated && h("p", { className: "cut", text: "… (cut)" }),
-        ],
+        "button",
+        {
+          className: "tb",
+          attrs: { type: "button", "aria-label": "Copy all pins" },
+          on: { click: props.onCopy },
+        },
+        [icon("copy"), "Copy"],
       ),
-    status.github !== null &&
-      !resolved &&
-      gitHubOptions(pin.number, status.github, props.send.state.busy, (choice) =>
-        props.onGitHub(pin.id, choice),
+      !copyOnly &&
+        h("button", {
+          className: "go",
+          text: props.drafts === 0 ? "Go" : `Go · send ${props.drafts}`,
+          attrs: { type: "button", ...(props.drafts === 0 ? { disabled: "" } : {}) },
+          on: { click: props.onGo },
+        }),
+      h(
+        "button",
+        {
+          className: "tb",
+          title: "Exit pin mode (Esc)",
+          attrs: { type: "button", "aria-label": "Exit pin mode" },
+          on: { click: props.onClose },
+        },
+        [icon("close")],
       ),
-  ]);
+    ],
+  );
 }
 
-function pullRequestLabel(url: string): string {
-  const number = /\/pull\/([0-9]+)/.exec(url)?.[1];
-  return number === undefined ? "Pull request" : `PR #${number}`;
+/** Which Claude gets the pins; opens the side panel's Sessions tab. */
+function sessionChip(props: ToolbarProps): HTMLButtonElement {
+  const { target } = props;
+  const [label, state] = chipText(target);
+  return h(
+    "button",
+    {
+      className: "tb session",
+      title: "Choose which Claude Code session gets the pins",
+      attrs: { type: "button", "aria-label": `Session: ${label}` },
+      on: { click: props.onSession },
+    },
+    [
+      h("span", { className: `dot ${state}` }),
+      h("span", { className: "label", text: label }),
+      icon("chevron"),
+    ],
+  );
 }
 
-function readLevel(value: string): DetailLevel {
-  return DETAIL_LEVELS.find((level) => level === value) ?? "standard";
+function chipText(target: ToolbarTarget | null): [string, string] {
+  if (target === null) return ["Open the panel", ""];
+  if (target.copyOnly) return ["Copy mode", ""];
+  if (target.connection === "checking") return ["Checking…", ""];
+  if (target.connection !== "paired") return ["Not connected", ""];
+  if (target.session === null) return ["Pick a session", ""];
+  const status = target.session.status;
+  return [
+    `${target.session.name} · ${status}`,
+    status === "idle" || status === "busy" ? status : "",
+  ];
 }
 
 /** Resolve after the browser has painted the current state of the page twice. */

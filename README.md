@@ -100,7 +100,7 @@ Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──
                 └──> Blocked               (the session never picked the message up, or it has no GitHub access)
 ```
 
-The status shows on the pin's marker and in the panel, and Squish's mood follows it: waiting while a pin is only Sent, working while Claude has it, squashed when it is Fixed, and blocked when it needs you. Claude's reply appears under the pin with simple markdown (bold, italics, code, lists, `https` links) rendered safely. The message asks the session to end its reply with a `SQUASHFLOW-FIXED [<pin id>] <pull request link>` line once it has opened the pull request; only that line, for a pull request on the session's own repository, moves the pin to *Fixed* and links the pull request. A pull request link that merely appears in a reply, or a reply saying the pin landed in the wrong session, leaves the pin where it was. A batch sent together shares one reply. Mark a pin **Resolved** once you are done with it, typically after merging, and **Reopen** it if not.
+The status shows on the pin's marker (outline for a draft, violet once sent or seen, green when fixed, orange when it needs you) and in the side panel, and Squish's mood follows it: waiting while a pin is only Sent, working while Claude has it, squashed when it is Fixed, and blocked when it needs you. Each pin's thread in the side panel reads like a chat: your comment, then each status change as a short line, Claude's replies as message bubbles with simple markdown (bold, italics, code, lists, `https` links) rendered safely, and your follow-ups. The message asks the session to end its reply with a `SQUASHFLOW-FIXED [<pin id>] <pull request link>` line once it has opened the pull request; only that line, for a pull request on the session's own repository, moves the pin to *Fixed* and links the pull request. A pull request link that merely appears in a reply, or a reply saying the pin landed in the wrong session, leaves the pin where it was. A batch sent together shares one reply. Mark a pin **Resolved** once you are done with it, typically after merging, and **Reopen** it if not.
 
 ## Fallbacks and edge cases
 
@@ -201,31 +201,40 @@ The store listing text, permission justifications, privacy statement and screens
 
 ## Try the extension
 
-On any `http` or `https` page, click the Squashflow button or press **Alt+Shift+P** to turn pin mode on (change the shortcut at `chrome://extensions/shortcuts`). While pin mode is on, clicks place pins instead of reaching the page:
+On any `http` or `https` page, click the Squashflow button or press **Alt+Shift+P** (change the shortcut at `chrome://extensions/shortcuts`). That opens the Squashflow side panel next to the page and turns pin mode on for that page. The page itself shows only a small dark toolbar at the bottom, the pins' numbered markers, and a comment box next to the pin you are placing; everything else is in the side panel.
 
-- **Click** an element to pin it, or **drag** to pin an area.
-- **Shift+click** several elements, then release Shift to pin them together.
-- Switch to **Text** and select text to pin the selection.
+The toolbar picks how you pin, and while pin mode is on, clicks place pins instead of reaching the page:
 
-Each pin gets a numbered marker and a comment box, and a screenshot of the pinned region of the tab (taken with Squashflow's own UI hidden); untick **Include screenshot** in the comment box to save the pin without it. The panel lists the page's pins, where you can edit, delete or copy them. Choose a detail level (compact, standard, detailed, or forensic, which adds the screenshot) and press **Copy** on one pin or **Copy all**, then paste the text into your Claude Code session. At forensic level, one pin's screenshot goes on the clipboard as an image along with the text (paste it into Claude Code with Ctrl+V); with several, the text says to use each pin's **Copy screenshot**. Press **Escape** to close the comment box, and again to leave pin mode. Pins are kept in the extension's local storage, per page, until you delete them.
+- **Element:** click an element to pin it (dragging pins an area, and Shift+click picks several).
+- **Text:** select text to pin the selection.
+- **Area:** drag a box around what you want to pin.
+- **Multi:** click several elements, then press **Pin N selected** (or Enter) to pin them together.
+
+It also shows which session gets the pins (click it to choose another), **Send now** or **Batch**, **Copy**, **Go · send N** and a close button. Each pin gets a numbered marker and a screenshot of the pinned region of the tab (taken with Squashflow's own UI hidden); untick **Attach a screenshot** in the comment box to save the pin without it. Click a marker to open that pin in the side panel. Press **Escape** to close the comment box, and again to leave pin mode; the side panel's **Start pinning on this page** turns it back on. Pins are kept in the extension's local storage, per page, until you delete them.
+
+The side panel has three tabs:
+
+- **Pins:** where pins go (**Sending to** a session, **Change**), **Send each pin now** or **Batch, then Go**, a line from Squish about what is going on, and the page's pins as cards. Open a pin to see its whole conversation: your comment and what was pinned (page, element, screenshot), then each status change, Claude's replies, and a box to reply to Claude. A draft can be edited, deleted, copied or sent from there.
+- **Sessions:** the Claude Code sessions running on this laptop as cards, to pick who should fix the page.
+- **Settings:** the helper connection (**Re-pair**, **Forget pairing**), how pins are sent, copy mode, how much detail Copy includes (compact, standard, detailed, or forensic, which adds the screenshot), and stopping pin mode on the page.
 
 To send pins straight to a session instead of pasting them:
 
 1. Start the helper with `squashflow` (see [Try the helper](#try-the-helper)). It prints a pairing code.
-2. In the panel's **Send to Claude Code** section, press **Pair with helper**, enter the code (and the port, if you started the helper with `--port`) and press **Pair**. You pair once; **Re-pair** and **Forget** are there if you need them.
-3. Pick the session to send to. Each one shows its name, whether it is idle or busy, what it is about (Claude Code's title for the session, or the start of its first prompt), its repository and branch, when it started and was last active, and its folder. Nothing is chosen for you unless exactly one session is on the repository remembered for this site, so **Send** appears only once a session is chosen. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since.
-4. Press **Send** on a pin, or **Send all**. The panel shows the exact message the session will receive; press **Send to claude@`<name>`** to deliver it, or **Cancel**. The panel then says it was sent, or why not in plain words (for example, the preview expired and needs previewing again).
+2. In the side panel, under **Connect to your terminal**, type the code (and the port, if you started the helper with `--port`) and press **Connect**. You pair once.
+3. Pick the session in the **Sessions** tab. Each card shows its name, whether it is idle or busy, what it is about (Claude Code's title for the session, or the start of its first prompt), its folder, repository and branch, and when it started and was last active. Nothing is chosen for you unless exactly one session is on the repository remembered for this site; sessions on that repository are marked **Matches this site**. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since. **Paste a GitHub repo link** and **Start new session** are shown but not available yet (coming soon).
+4. With **Batch, then Go** (the default), pins wait as drafts; press **Go** on the toolbar or in the side panel to send them all. With **Send each pin now**, each pin is sent as you save it. Either way the side panel first shows the exact message the session will receive; press **Send to claude@`<name>`** to deliver it, or **Cancel**. The panel then says it was sent, or why not in plain words (for example, the preview expired and needs previewing again).
 
-After sending, each pin shows its [status](#pin-status) on its marker and in the panel: *Sent*, *Seen by Claude* or *Approve in terminal*, then *Fixed* with Claude's reply and the pull request link. Press **Resolve** on a pin when you are done with it, or **Reopen** to undo that. The helper follows a pin until Claude replies; if the session's transcript goes quiet for 30 minutes before the pin is picked up (for example, the session exited), the pin shows *Blocked*. Status and replies arrive while pin mode is open on the page, and catch up the next time you open it.
+After sending, each pin shows its [status](#pin-status) on its marker and in the side panel: *Sent*, *Seen by Claude* or *Approve in terminal*, then *Fixed* with Claude's reply and the pull request link. Not quite right? Type a reply in the pin's conversation: it goes to the same session as a follow-up about the same element, previewed and confirmed like a pin, and the pin follows it from *Sent* again. Press **Resolve** on a pin when you are done with it, or **Reopen** to undo that. The helper follows a pin until Claude replies; if the session's transcript goes quiet for 30 minutes before the pin is picked up (for example, the session exited), the pin shows *Blocked*. Status and replies arrive while the side panel or pin mode is open, and catch up the next time you open it.
 
-If the helper is not running, you have not paired, or no session is open on the site's repository, the panel says so and Copy still works.
+To copy instead, press **Copy** on the toolbar (it works with nothing connected), **Copy all** in the side panel, or **Skip, I'll just copy and paste** when it asks you to connect: copy mode never sends anything and shows a preview of exactly what Copy puts on the clipboard. Paste the text into your Claude Code session. At forensic level, one pin's screenshot goes on the clipboard as an image along with the text (paste it into Claude Code with Ctrl+V); with several, the text says to use each pin's **Copy screenshot**. If the helper is not running, you have not paired, or no session is open on the site's repository, the side panel says so and Copy still works.
 
 ### When GitHub says no
 
-Every message asks the session to commit the fix on a new branch, push it and open a pull request with `gh pr create`, all with your own `git` and `gh` login; Squashflow never sees a GitHub token. If the push or the pull request fails because you lack access, the session stops instead of retrying and replies with a fixed line, `SQUASHFLOW-BLOCKED [sf-…] github-access: <reason>`, which moves the pin to *Blocked: GitHub access*. The pin then offers:
+Every message asks the session to commit the fix on a new branch, push it and open a pull request with `gh pr create`, all with your own `git` and `gh` login; Squashflow never sees a GitHub token. If the push or the pull request fails because you lack access, the session stops instead of retrying and replies with a fixed line, `SQUASHFLOW-BLOCKED [sf-…] github-access: <reason>`, which moves the pin to *Blocked: GitHub access*. The pin's conversation then says *Claude made the fix, but can't push it* and offers:
 
-- **Log in:** shows `gh auth login` to run in a terminal, then **Retry**, which sends the session a follow-up to push and open the pull request again.
-- **Fork and open a PR:** sends a follow-up asking the session to fork the repository and open the pull request from the fork.
+- **Fork and open a PR** (recommended): sends a follow-up asking the session to fork the repository and open the pull request from the fork.
+- **Log in with another account:** shows `gh auth login` to run in a terminal, then **Retry**, which sends the session a follow-up to push and open the pull request again.
 - **Copy the patch:** copies the diff from Claude's reply. If no reply has one yet, it first sends a follow-up asking the session for it; press it again once Claude replies.
 - **Ask the owner:** copies a ready-made message for the repository owner, with your comment and Claude's summary of the change.
 
@@ -237,10 +246,11 @@ The extension asks for as little as it can:
 | --- | --- |
 | `activeTab` | Lets the extension act on the current tab only, and only after you click its button or press its shortcut. The same grant lets it screenshot that tab's visible area for a pin's region screenshot. There are no host permissions: it cannot read or change any site on its own. |
 | `scripting` | Injects the pin mode script into that tab when you turn pin mode on. Nothing is injected into pages you have not asked for. |
+| `sidePanel` | Shows Squashflow's panel (your pins and their conversations, the sessions, the settings) in Chrome's side panel next to the page, instead of on top of the page. It opens when you click the toolbar button. It gives no access to any page. |
 | `storage` | Keeps your pins, their screenshots, their status and Claude's replies, and the sites whose repository you asked it to remember, in the extension's local storage, which web pages cannot read. |
 | `unlimitedStorage` | Region screenshots are kept with their pins (up to 200 KB each). Without this, local storage stops at 10 MB, and saving pins would start failing after a few dozen screenshots. It adds no install warning and gives no access to anything else. |
 
-There is no remote code: everything the extension runs ships inside it. Talking to the helper needs no extra permission: only the extension's background service worker calls it, on `127.0.0.1`, and the helper answers only the paired extension's origin. The pairing token stays in that service worker's own storage, out of reach of web pages and of the script running in the page. It never captures the values of form fields (including password and hidden fields) as text, and every captured field is size-capped; a region screenshot does show whatever is on screen in that region, so untick **Include screenshot** when it holds something private; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The pin UI runs inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool.
+There is no remote code: everything the extension runs ships inside it, including its fonts (Geist, Geist Mono and Newsreader, under the SIL Open Font License). Talking to the helper needs no extra permission: only the extension's background service worker calls it, on `127.0.0.1`, at the side panel's request, and the helper answers only the paired extension's origin. The pairing token stays in that service worker's own storage, out of reach of web pages, of the script running in the page, and of the side panel. The script in the page cannot ask the helper anything at all. It never captures the values of form fields (including password and hidden fields) as text, and every captured field is size-capped; a region screenshot does show whatever is on screen in that region, so untick **Attach a screenshot** when it holds something private; the details are in [docs/architecture.md](docs/architecture.md#the-extension). The toolbar and comment box run inside the page, so a page's own scripts can see what you type into a comment box, as they can with any in-page tool; replies to Claude are typed in the side panel, which pages cannot see.
 
 ## Try it end to end
 
@@ -248,12 +258,12 @@ With a clone built (`corepack pnpm install && corepack pnpm build`) and the exte
 
 1. **Start the helper** in a terminal: `node packages/helper/dist/cli.js` (or the `squashflow` alias from [Try the helper](#try-the-helper)). It prints a pairing code.
 2. **Open Claude Code** in a clone of a GitHub repository you can push to, as you normally would.
-3. **Open a page of that project** (a local dev server or the live site) and press **Alt+Shift+P**.
-4. **Pin something**: drag an area around what should change and write what you want, for example "make this heading smaller". Keep **Include screenshot** ticked.
-5. **Pair** in the panel with the code from step 1, pick your session, and tick **Remember: this site's code is `owner/repo`**.
-6. **Send** the pin. The preview shows the exact message, including the screenshot's file path under `~/.squashflow/screenshots/` and its SHA-256; press **Send to claude@`<name>`**.
-7. **Watch the pin**: *Sent*, then *Seen by Claude* (or *Approve in terminal* in a bypass-permissions session; approve it there). Claude may ask to read the screenshot file, which is outside the project folder; allow it.
-8. **Review the pull request** linked on the pin once it shows *Fixed*, then mark the pin **Resolved**.
+3. **Open a page of that project** (a local dev server or the live site) and press **Alt+Shift+P**. The side panel opens next to the page.
+4. **Connect** in the side panel with the code from step 1, pick your session, and tick **Remember: this site's code is `owner/repo`**.
+5. **Pin something**: pick **Area** on the toolbar, drag around what should change and write what you want, for example "make this heading smaller". Keep **Attach a screenshot** ticked and press **Save pin**.
+6. **Go.** The preview shows the exact message, including the screenshot's file path under `~/.squashflow/screenshots/` and its SHA-256; press **Send to claude@`<name>`**.
+7. **Watch the pin's conversation**: *Sent*, then *Seen by Claude* (or *Approve in terminal* in a bypass-permissions session; approve it there), then Claude's reply. Claude may ask to read the screenshot file, which is outside the project folder; allow it.
+8. **Review the pull request** linked in the conversation once the pin shows *Fixed*, then **Resolve** it, or reply to Claude if it is not right yet.
 
 ## Roadmap
 

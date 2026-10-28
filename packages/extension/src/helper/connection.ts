@@ -1,7 +1,8 @@
 /**
  * The pairing with the helper: its port and the pairing token. Kept in the service
  * worker's IndexedDB, which belongs to the extension's own origin: web pages cannot
- * read it, and neither can the pin mode script, which runs in the page's origin.
+ * read it, and neither can the pin mode script, which runs in the page's origin. The side
+ * panel never reads it either: it asks the service worker, like the pin mode script.
  * (`chrome.storage.local` would be readable from the pin mode script.)
  */
 

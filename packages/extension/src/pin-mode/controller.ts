@@ -1,12 +1,15 @@
 /**
  * Pin mode on the current page. While it is on, clicks on the page place pins instead
- * of reaching the page: click an element, drag an area, Shift+click several elements,
- * or switch to Text and select text. Escape closes the comment box, then exits.
+ * of reaching the page. The toolbar picks how: Element (click an element, or drag an
+ * area), Text (select text), Area (drag a box) or Multi (click several elements, then
+ * pin them together; Shift+click does the same in Element). Escape closes the comment
+ * box, then clears a selection, then exits.
  * Each new pin gets a region screenshot of the visible tab, taken with the pin UI hidden.
- * Sent pins show their status and Claude's reply, which the service worker stores.
+ * The page shows only the toolbar, the markers and the comment box; the side panel,
+ * connected through `PanelLink`, does everything else, including every helper call.
  */
 
-import type { DetailLevel, PageContext, Rect, Screenshot } from "@squashflow/shared";
+import type { PageContext, Rect, Screenshot } from "@squashflow/shared";
 import { capturePin, pageRect, type PinTarget } from "../capture/context";
 import {
   pinRegion,
@@ -15,30 +18,25 @@ import {
   type ScreenshotRequest,
 } from "../capture/screenshot";
 import { DRAG_THRESHOLD_PX, HOST_TAG } from "../constants";
-import { copyPins, copyScreenshot, writeClipboard } from "../copy/copy";
-import { askWorker, type AskWorker } from "../helper/messages";
+import { copyPins } from "../copy/copy";
+import type { ToolbarTarget } from "../panel/protocol";
 import {
-  moodFor,
-  moodForStatus,
-  shownLabel,
-  shownStatus,
-  type PinStatuses,
-} from "../status/pin-status";
+  DEFAULT_SETTINGS,
+  SettingsStore,
+  watchSettings,
+  type SendMode,
+  type Settings,
+} from "../settings";
+import { shownLabel, shownStatus, type PinStatuses } from "../status/pin-status";
 import { chromeStatusSource, type StatusSource } from "../status/store";
-import { pinPageUrl, type PinStore, type StoredPin } from "../store/pins";
-import type { SquishMood } from "../ui/squish";
-import { PinView, type PinModeKind, type PinStatusView } from "../ui/view";
-import type { GitHubChoice } from "../ui/github-view";
-import { GitHubActions } from "./github-actions";
-import { SendFlow } from "./send-flow";
+import { pinPageUrl, watchPins, type PinStore, type StoredPin } from "../store/pins";
+import { addPageFonts } from "../ui/page-fonts";
+import { PinView, type MarkerView, type PinModeKind } from "../ui/view";
+import { PanelLink } from "./panel-link";
 
-const MOOD_RESET_MS = 2500;
-/**
- * While a pin on the page is in flight, ask the service worker to catch up this often.
- * It re-reads the helper and reopens its event stream if the browser stopped the worker.
- */
-const TRACK_INTERVAL_MS = 20_000;
 const MAX_AREA_ELEMENTS = 20;
+/** How long a status line stays on the page. */
+const STATUS_MS = 6000;
 
 interface Drag {
   startX: number;
@@ -48,52 +46,38 @@ interface Drag {
 
 export class PinMode {
   private readonly view = new PinView();
+  private readonly settingsStore = new SettingsStore(chrome.storage.local);
+  private readonly link: PanelLink;
   private pins: StoredPin[] = [];
   private mode: PinModeKind = "element";
-  private level: DetailLevel = "standard";
+  private settings: Settings = DEFAULT_SETTINGS;
+  private target: ToolbarTarget | null = null;
   private selection: Element[] = [];
   private drag: Drag | null = null;
   /** Set while a new pin's screenshot is being taken; further pins wait for it. */
   private capturing = false;
-  private status: { text: string; error: boolean } | null = null;
-  /** A short-lived mood after an action; otherwise Squish follows the pins' statuses. */
-  private flash: SquishMood | null = null;
-  private moodTimer: ReturnType<typeof setTimeout> | undefined;
   private statuses: PinStatuses = {};
-  private trackTimer: ReturnType<typeof setInterval> | undefined;
-  private unwatch: () => void = () => undefined;
+  private statusTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly cleanups: (() => void)[] = [];
   private readonly listeners: [string, EventListener, Window | Document][] = [];
-  private readonly send: SendFlow;
-  private readonly github: GitHubActions;
 
   constructor(
     private readonly store: PinStore,
     private readonly onStop: () => void,
-    private readonly ask: AskWorker = askWorker,
     private readonly statusSource: StatusSource = chromeStatusSource(),
   ) {
-    this.send = new SendFlow({
-      ask,
+    this.link = new PanelLink({
       pageUrl: () => pinPageUrl(location.href),
-      onChange: () => this.render(),
-      report: (text, outcome) => {
-        this.setStatus(text, outcome === "error");
-        this.setMood(outcome === "error" ? "blocked" : "squashed");
+      onTarget: (target) => {
+        this.target = target;
+        this.renderToolbar();
       },
-    });
-    this.github = new GitHubActions({
-      send: this.send,
-      pageUrl: () => pinPageUrl(location.href),
-      copy: (text) => writeClipboard(text, this.view.host.shadowRoot ?? this.view.host),
-      report: (text) => {
-        this.setStatus(text);
-        this.setMood("squashed");
-      },
-      onChange: () => this.render(),
+      onStop: () => this.stop(),
     });
   }
 
   async start(): Promise<void> {
+    this.cleanups.push(addPageFonts());
     this.listen(window, "mousemove", (event) => this.onMove(event as MouseEvent));
     this.listen(window, "mousedown", (event) => this.onDown(event as MouseEvent));
     this.listen(window, "mouseup", (event) => this.onUp(event as MouseEvent));
@@ -101,24 +85,33 @@ export class PinMode {
     this.listen(window, "keydown", (event) => this.onKeyDown(event as KeyboardEvent));
     this.listen(window, "keyup", (event) => this.onKeyUp(event as KeyboardEvent));
     this.listen(window, "resize", () => this.renderMarkers());
+    this.render();
+    this.settings = await this.settingsStore.read();
+    this.cleanups.push(
+      watchSettings((settings) => {
+        this.settings = settings;
+        this.render();
+      }),
+    );
     this.statuses = await this.statusSource.read();
-    this.unwatch = this.statusSource.watch((statuses) => {
-      this.statuses = statuses;
-      this.render();
-    });
+    this.cleanups.push(
+      this.statusSource.watch((statuses) => {
+        this.statuses = statuses;
+        this.render();
+      }),
+    );
+    this.cleanups.push(watchPins(location.href, () => void this.reload()));
     await this.reload();
-    await this.send.start();
-    await this.track();
-    this.trackTimer = setInterval(() => void this.track(), TRACK_INTERVAL_MS);
+    this.link.start();
   }
 
   stop(): void {
     for (const [type, listener, target] of this.listeners) {
       target.removeEventListener(type, listener, true);
     }
-    clearTimeout(this.moodTimer);
-    clearInterval(this.trackTimer);
-    this.unwatch();
+    for (const cleanup of this.cleanups) cleanup();
+    clearTimeout(this.statusTimer);
+    this.link.stop();
     this.view.destroy();
     this.onStop();
   }
@@ -139,6 +132,10 @@ export class PinMode {
       this.updateDrag(event);
       return;
     }
+    if (this.mode === "area") {
+      this.view.showHover(null);
+      return;
+    }
     const target = this.pageElementAt(event.clientX, event.clientY);
     this.view.showHover(target === null ? null : pageRect(target));
   }
@@ -146,7 +143,7 @@ export class PinMode {
   private onDown(event: MouseEvent): void {
     if (this.view.owns(event) || event.button !== 0 || this.mode === "text") return;
     block(event);
-    if (this.view.composing) return;
+    if (this.view.composing || this.mode === "multi") return;
     this.drag = { startX: event.pageX, startY: event.pageY, area: null };
   }
 
@@ -165,9 +162,10 @@ export class PinMode {
       this.pinArea(drag.area);
       return;
     }
+    if (this.mode === "area") return;
     const target = this.pageElementAt(event.clientX, event.clientY);
     if (target === null) return;
-    if (event.shiftKey) this.toggleSelected(target);
+    if (event.shiftKey || this.mode === "multi") this.toggleSelected(target);
     else this.compose({ kind: "element", element: target });
   }
 
@@ -176,23 +174,21 @@ export class PinMode {
   }
 
   private onKeyDown(event: KeyboardEvent): void {
+    if (event.key === "Enter" && this.mode === "multi" && !this.view.composing) {
+      block(event);
+      this.pinSelection();
+      return;
+    }
     if (event.key !== "Escape") return;
     block(event);
     if (this.view.composing) this.view.closeComposer();
-    else if (this.send.state.preview !== null) this.send.cancelPreview();
     else if (this.selection.length > 0) this.setSelection([]);
     else this.stop();
   }
 
   private onKeyUp(event: KeyboardEvent): void {
-    if (event.key !== "Shift" || this.selection.length === 0 || this.view.composing) return;
-    const elements = this.selection;
-    this.setSelection([]);
-    this.compose(
-      elements.length === 1 && elements[0]
-        ? { kind: "element", element: elements[0] }
-        : { kind: "elements", elements },
-    );
+    if (event.key !== "Shift" || this.mode === "multi" || this.view.composing) return;
+    this.pinSelection();
   }
 
   // ---- placing pins ----
@@ -246,6 +242,19 @@ export class PinMode {
   private setSelection(elements: Element[]): void {
     this.selection = elements;
     this.view.showSelection(elements.map(pageRect));
+    this.renderToolbar();
+  }
+
+  /** Turn the elements picked in Multi mode (or with Shift) into one pin. */
+  private pinSelection(): void {
+    const elements = this.selection;
+    if (elements.length === 0) return;
+    this.setSelection([]);
+    this.compose(
+      elements.length === 1 && elements[0]
+        ? { kind: "element", element: elements[0] }
+        : { kind: "elements", elements },
+    );
   }
 
   private compose(target: PinTarget): void {
@@ -298,13 +307,13 @@ export class PinMode {
     this.view.openComposer({
       anchor: context.area ??
         context.rect ?? { x: 16, y: window.scrollY + 16, width: 0, height: 0 },
-      heading: describeTarget(target),
-      initial: "",
-      editing: false,
+      number: this.pins.length + 1,
+      where: context.selector ?? describeTarget(target),
+      hint: this.saveHint(),
       screenshot: screenshot !== undefined,
       onSave: (comment, includeScreenshot) => {
         void this.run(async () => {
-          await this.store.add({
+          const pin = await this.store.add({
             comment,
             context,
             screenshot: includeScreenshot ? screenshot : undefined,
@@ -312,131 +321,57 @@ export class PinMode {
           this.view.closeComposer();
           window.getSelection()?.removeAllRanges();
           await this.reload();
+          if (this.sendsEachPin()) this.link.send({ type: "send-pin", pinId: pin.id });
         });
       },
       onCancel: () => this.view.closeComposer(),
-      onDelete: () => this.view.closeComposer(),
     });
   }
 
-  private edit(id: string): void {
-    const index = this.pins.findIndex((pin) => pin.id === id);
-    const pin = this.pins[index];
-    if (pin === undefined) return;
-    this.view.openComposer({
-      anchor: anchorOf(pin),
-      heading: `Pin ${index + 1}`,
-      initial: pin.comment,
-      editing: true,
-      screenshot: false,
-      onSave: (comment) => {
-        void this.run(async () => {
-          await this.store.update(id, comment);
-          this.view.closeComposer();
-          await this.reload();
-        });
-      },
-      onCancel: () => this.view.closeComposer(),
-      onDelete: () => this.remove(id),
-    });
+  private sendsEachPin(): boolean {
+    return this.settings.sendMode === "now" && !this.settings.copyOnly;
   }
 
-  private remove(id: string): void {
+  private saveHint(): string {
+    if (this.settings.copyOnly) return "Saved here · copy any time";
+    if (this.sendsEachPin()) return "Send now · you preview it first";
+    return "Batch on · sends with Go";
+  }
+
+  // ---- toolbar ----
+
+  private setMode(mode: PinModeKind): void {
+    this.mode = mode;
+    this.setSelection([]);
+    this.view.showHover(null);
+  }
+
+  private setSendMode(sendMode: SendMode): void {
     void this.run(async () => {
-      await this.store.remove(id);
-      if (this.statuses[id] !== undefined) {
-        await this.ask({ type: "mark", pinId: id, mark: "forget" });
-      }
-      this.view.closeComposer();
-      await this.reload();
-    });
-  }
-
-  // ---- copy ----
-
-  private copy(pins: readonly StoredPin[]): void {
-    void this.run(async () => {
-      const result = await copyPins(
-        { pins, level: this.level, pageUrl: pinPageUrl(location.href) },
-        this.view.host.shadowRoot ?? this.view.host,
-      );
-      const what = pins.length === 1 ? "1 pin" : `${pins.length} pins`;
-      this.setStatus(`Copied ${what} (${this.level}). ${copyAdvice(result)}`);
-      this.setMood("squashed");
-    });
-  }
-
-  private copyShot(id: string): void {
-    const screenshot = this.pins.find((pin) => pin.id === id)?.screenshot;
-    if (screenshot === undefined) return;
-    void this.run(async () => {
-      await copyScreenshot(screenshot);
-      this.setStatus("Copied the screenshot. Paste it into your Claude Code session.");
-      this.setMood("squashed");
-    });
-  }
-
-  // ---- send ----
-
-  private sendPins(pins: readonly StoredPin[]): void {
-    void this.send.preview(pins);
-  }
-
-  // ---- status ----
-
-  /** Catch up on pins in flight on this page; the worker's answer is the latest. */
-  private async track(): Promise<void> {
-    const inFlight = this.pins.some((pin) => this.statuses[pin.id]?.inFlight === true);
-    if (!inFlight) return;
-    const reply = await this.ask({ type: "track" });
-    if (!reply.ok) return;
-    this.statuses = reply.value;
-    this.render();
-  }
-
-  private resolve(id: string, resolved: boolean): void {
-    void this.run(async () => {
-      const reply = await this.ask({
-        type: "mark",
-        pinId: id,
-        mark: resolved ? "resolve" : "reopen",
-      });
-      if (!reply.ok) throw new Error(reply.failure.message);
-      this.statuses = reply.value;
+      this.settings = await this.settingsStore.change({ sendMode });
       this.render();
     });
   }
 
-  private chooseGitHub(id: string, choice: GitHubChoice): void {
-    const index = this.pins.findIndex((pin) => pin.id === id);
-    const pin = this.pins[index];
-    const tracking = this.statuses[id];
-    if (pin === undefined || tracking === undefined) return;
-    void this.run(() => this.github.choose(choice, pin, index + 1, tracking));
-  }
-
-  private statusOf(id: string): PinStatusView | null {
-    const tracking = this.statuses[id];
-    if (tracking === undefined) return null;
-    const status = shownStatus(tracking);
-    const latest = tracking.thread.at(-1);
-    return {
-      status,
-      label: shownLabel(tracking),
-      mood: moodForStatus(status),
-      reply: latest === undefined ? null : { text: latest.text, truncated: latest.truncated },
-      pullRequestUrl: tracking.pullRequestUrl,
-      github: this.github.view(id, tracking),
-    };
-  }
-
-  private currentMood(): SquishMood {
-    if (this.flash !== null) return this.flash;
-    const shown = this.pins.flatMap((pin) => {
-      const tracking = this.statuses[pin.id];
-      return tracking === undefined ? [] : [shownStatus(tracking)];
+  private copyAll(): void {
+    if (this.pins.length === 0) {
+      this.setStatus("No pins on this page yet. Click something to pin it.");
+      return;
+    }
+    void this.run(async () => {
+      const { level } = this.settings;
+      const result = await copyPins(
+        { pins: this.pins, level, pageUrl: pinPageUrl(location.href) },
+        this.view.host.shadowRoot ?? this.view.host,
+      );
+      const what = this.pins.length === 1 ? "1 pin" : `${this.pins.length} pins`;
+      const image = result.imageAttached ? " and the screenshot" : "";
+      this.setStatus(`Copied ${what}${image} (${level}). Paste into your Claude Code session.`);
     });
-    return moodFor(shown) ?? "waiting";
+  }
+
+  private drafts(): StoredPin[] {
+    return this.pins.filter((pin) => this.statuses[pin.id] === undefined);
   }
 
   // ---- rendering ----
@@ -447,75 +382,41 @@ export class PinMode {
   }
 
   private render(): void {
-    this.view.renderPanel({
-      pins: this.pins.map((pin, index) => ({
-        id: pin.id,
-        number: index + 1,
-        comment: pin.comment,
-        hasScreenshot: pin.screenshot !== undefined,
-        status: this.statusOf(pin.id),
-      })),
-      mode: this.mode,
-      level: this.level,
-      status: this.status,
-      mood: this.currentMood(),
-      onMode: (mode) => {
-        this.mode = mode;
-        this.setSelection([]);
-        this.render();
-      },
-      onLevel: (level) => {
-        this.level = level;
-        this.render();
-      },
-      send: {
-        state: this.send.state,
-        target: this.send.target,
-        handlers: {
-          onOpenPairing: () => this.send.openPairing(),
-          onClosePairing: () => this.send.closePairing(),
-          onPair: (code, port) => void this.send.pair(code, port),
-          onForget: () => void this.send.forget(),
-          onRetry: () => void this.send.start(),
-          onRefresh: () => void this.send.refresh(),
-          onSelect: (pid) => this.send.select(pid),
-          onRemember: (remember) => void this.send.rememberSite(remember),
-        },
-      },
-      canSend: this.send.target !== null,
-      onCopy: (id) => this.copy(this.pins.filter((pin) => pin.id === id)),
-      onCopyAll: () => this.copy(this.pins),
-      onCopyScreenshot: (id) => this.copyShot(id),
-      onSend: (id) => this.sendPins(this.pins.filter((pin) => pin.id === id)),
-      onSendAll: () => this.sendPins(this.pins),
-      onEdit: (id) => this.edit(id),
-      onDelete: (id) => this.remove(id),
-      onResolve: (id, resolved) => this.resolve(id, resolved),
-      onGitHub: (id, choice) => this.chooseGitHub(id, choice),
-      onClose: () => this.stop(),
-    });
-    const { preview, busy } = this.send.state;
-    this.view.renderPreview(
-      preview === null
-        ? null
-        : {
-            preview,
-            busy,
-            onConfirm: () => void this.send.confirm(),
-            onCancel: () => this.send.cancelPreview(),
-          },
-    );
+    this.renderToolbar();
     this.renderMarkers();
   }
 
+  private renderToolbar(): void {
+    this.view.renderToolbar({
+      mode: this.mode,
+      target: this.target,
+      sendMode: this.settings.sendMode,
+      drafts: this.drafts().length,
+      selected: this.selection.length,
+      onMode: (mode) => this.setMode(mode),
+      onSendMode: (mode) => this.setSendMode(mode),
+      onSession: () => this.link.send({ type: "open-tab", tab: "sessions" }),
+      onPinSelection: () => this.pinSelection(),
+      onCopy: () => this.copyAll(),
+      onGo: () => this.link.send({ type: "go" }),
+      onClose: () => this.stop(),
+    });
+  }
+
   private renderMarkers(): void {
-    const markers = this.pins.map((pin, index) => ({
-      id: pin.id,
-      number: index + 1,
-      at: anchorOf(pin),
-      status: this.statusOf(pin.id),
-    }));
-    this.view.renderMarkers(markers, (id) => this.edit(id));
+    const markers: MarkerView[] = this.pins.map((pin, index) => {
+      const tracking = this.statuses[pin.id];
+      return {
+        id: pin.id,
+        number: index + 1,
+        at: anchorOf(pin),
+        status:
+          tracking === undefined
+            ? null
+            : { status: shownStatus(tracking), label: shownLabel(tracking) },
+      };
+    });
+    this.view.renderMarkers(markers, (id) => this.link.send({ type: "open-pin", pinId: id }));
   }
 
   private async run(action: () => Promise<void>): Promise<void> {
@@ -523,23 +424,13 @@ export class PinMode {
       await action();
     } catch (error: unknown) {
       this.setStatus(error instanceof Error ? error.message : "Something went wrong.", true);
-      this.setMood("blocked");
     }
   }
 
   private setStatus(text: string, error = false): void {
-    this.status = { text, error };
-    this.render();
-  }
-
-  private setMood(mood: SquishMood): void {
-    this.flash = mood;
-    this.render();
-    clearTimeout(this.moodTimer);
-    this.moodTimer = setTimeout(() => {
-      this.flash = null;
-      this.render();
-    }, MOOD_RESET_MS);
+    this.view.showStatus({ text, error });
+    clearTimeout(this.statusTimer);
+    this.statusTimer = setTimeout(() => this.view.showStatus(null), STATUS_MS);
   }
 
   private pageElementAt(x: number, y: number): Element | null {
@@ -570,32 +461,16 @@ function safeQuery(selector: string): Element | null {
   }
 }
 
-function copyAdvice({
-  imageAttached,
-  screenshots,
-}: {
-  imageAttached: boolean;
-  screenshots: number;
-}): string {
-  if (imageAttached) {
-    return "Paste the text into your Claude Code session, then paste the screenshot (Ctrl+V).";
-  }
-  if (screenshots > 0) {
-    return "Paste it into your Claude Code session; the text says how to add the screenshots.";
-  }
-  return "Paste it into your Claude Code session.";
-}
-
 function describeTarget(target: PinTarget): string {
   switch (target.kind) {
     case "element":
-      return `Pin on <${target.element.localName}>`;
+      return `<${target.element.localName}>`;
     case "elements":
-      return `Pin on ${target.elements.length} elements`;
+      return `${target.elements.length} elements`;
     case "text":
-      return "Pin on the selected text";
+      return "Selected text";
     case "area":
-      return `Pin on an area (${Math.round(target.area.width)}×${Math.round(target.area.height)})`;
+      return `Area ${Math.round(target.area.width)} × ${Math.round(target.area.height)}`;
   }
 }
 

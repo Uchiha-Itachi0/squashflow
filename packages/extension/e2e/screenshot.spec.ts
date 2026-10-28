@@ -9,7 +9,7 @@ import { expect, test } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { launchExtension, type ExtensionHarness } from "./harness";
+import { launchExtension, pair, type ExtensionHarness } from "./harness";
 import { startHelper, type RunningHelper } from "./helper-harness";
 
 const DEMO = {
@@ -41,11 +41,11 @@ test.afterAll(async () => {
 });
 
 test("pin an area, send it, and the session gets its screenshot", async () => {
+  const panel = await harness.openPanel();
   const page = await harness.context.newPage();
   await page.setViewportSize({ width: 1000, height: 700 });
   await page.goto(`${harness.origin}/`);
-  await harness.togglePinMode(page);
-  const panel = page.getByRole("region", { name: "Squashflow pins" });
+  await harness.startPinMode(page);
 
   // Drag an area around the pricing card.
   const card = await page.locator(".card").boundingBox();
@@ -57,12 +57,10 @@ test("pin an area, send it, and the session gets its screenshot", async () => {
   await page.mouse.up();
   const box = page.getByRole("textbox", { name: "Comment" });
   await expect(box).toBeFocused();
-  await expect(page.getByRole("checkbox", { name: "Include screenshot" })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Attach a screenshot" })).toBeChecked();
   await box.fill("Tighten the pricing card");
-  await page.getByRole("button", { name: "Save" }).click();
-
-  const row = panel.locator("li", { hasText: "Tighten the pricing card" });
-  await expect(row.getByText("Screenshot", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Save pin" }).click();
+  await expect(page.getByRole("button", { name: "Pin 1: draft" })).toBeVisible();
   const worker = await harness.worker();
   const stored: Record<string, { screenshot?: StoredShot }[]> = await worker.evaluate(() =>
     chrome.storage.local.get(null),
@@ -73,14 +71,15 @@ test("pin an area, send it, and the session gets its screenshot", async () => {
   expect(shot?.height).toBeGreaterThan(card.height);
   expect(shot?.height).toBeLessThan(card.height + 40);
 
-  await panel.getByRole("button", { name: "Pair with helper" }).click();
-  await panel.getByRole("textbox", { name: "Pairing code" }).fill(helper.pairingCode);
-  await panel.getByRole("spinbutton", { name: "Helper port" }).fill(String(helper.port));
-  await panel.getByRole("button", { name: "Pair", exact: true }).click();
+  await pair(panel, helper.pairingCode, helper.port);
   await panel.getByRole("radio", { name: /e2e-shots/ }).check();
+  await panel.getByRole("button", { name: "Use e2e-shots" }).click();
 
+  // The thread shows what was pinned, with its screenshot.
+  await panel.getByRole("button", { name: "Open pin 1" }).click();
+  await expect(panel.getByRole("img", { name: "Screenshot of the pinned region" })).toBeVisible();
   await panel.getByRole("button", { name: "Send pin 1" }).click();
-  const dialog = page.getByRole("dialog", { name: "Message preview" });
+  const dialog = panel.getByRole("dialog", { name: "Message preview" });
   const previewed = await dialog.locator("pre").innerText();
   const pinId = /\[(sf-[0-9a-f]{12})\]/.exec(previewed)?.[1] ?? "";
   const file = join(helper.home, "screenshots", pinId, "pin-1.png");

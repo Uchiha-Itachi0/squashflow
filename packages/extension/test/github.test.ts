@@ -7,8 +7,8 @@ import { HelperService } from "../src/helper/service";
 import { SiteRepoStore } from "../src/helper/sites";
 import { StatusTracker } from "../src/helper/tracker";
 import { buildOwnerMessage, changeSummary, extractPatch } from "../src/github/blocked";
-import { GitHubActions } from "../src/pin-mode/github-actions";
-import { SendFlow } from "../src/pin-mode/send-flow";
+import { GitHubActions } from "../src/panel/github-actions";
+import { SendFlow } from "../src/panel/send-flow";
 import { trackSent, type PinTracking } from "../src/status/pin-status";
 import { PinStatusStore } from "../src/status/store";
 import type { StorageAreaLike, StoredPin } from "../src/store/pins";
@@ -159,7 +159,6 @@ function actions(worker: ReturnType<typeof fakeWorker>) {
   });
   const github = new GitHubActions({
     send,
-    pageUrl: () => PAGE,
     copy: (text) => {
       copied.push(text);
       return Promise.resolve();
