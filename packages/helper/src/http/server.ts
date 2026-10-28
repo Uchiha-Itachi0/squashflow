@@ -135,7 +135,7 @@ async function route(
   } else if (path === "/pins" && method === "POST") {
     await pins(context, request, response);
   } else if (path === "/events" && method === "GET") {
-    events(context, request, response);
+    events(context, response);
   } else {
     const pinId = PIN_PATH.exec(path)?.[1];
     const pin = pinId !== undefined && method === "GET" ? context.delivery.get(pinId) : undefined;
@@ -239,7 +239,12 @@ async function deliverPreviewed(
     return;
   }
   try {
-    const draft = context.delivery.takeDraft(input.pinId, input.digest, input.pageUrl, input.pins);
+    const draft = context.delivery.verifyDraft(
+      input.pinId,
+      input.digest,
+      input.pageUrl,
+      input.pins,
+    );
     if (draft.session.pid !== session.pid) {
       send(response, 409, { error: "The session changed since the preview; preview again" });
       return;
@@ -254,18 +259,25 @@ async function deliverPreviewed(
   }
 }
 
-function events(context: HelperContext, request: IncomingMessage, response: ServerResponse): void {
+function events(context: HelperContext, response: ServerResponse): void {
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-store",
     Connection: "keep-alive",
   });
-  response.write(": squashflow events\n\n");
+  const openedWith = context.auth.tokenHash;
+  const write = (chunk: string): void => {
+    if (context.auth.tokenHash === openedWith) response.write(chunk);
+    else response.end();
+  };
+  write(": squashflow events\n\n");
   const unsubscribe = context.delivery.subscribe((pin) => {
-    response.write(`event: pin\ndata: ${JSON.stringify(pin)}\n\n`);
+    write(`event: pin\ndata: ${JSON.stringify(pin)}\n\n`);
   });
-  const keepalive = setInterval(() => response.write(": keepalive\n\n"), SSE_KEEPALIVE_MS);
-  request.on("close", () => {
+  const keepalive = setInterval(() => {
+    write(": keepalive\n\n");
+  }, SSE_KEEPALIVE_MS);
+  response.on("close", () => {
     clearInterval(keepalive);
     unsubscribe();
   });

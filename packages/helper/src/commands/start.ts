@@ -22,7 +22,7 @@ export async function startCommand(term: Terminal, options: StartOptions): Promi
   const store = new StateStore(defaultStateDir());
   const state = await store.load();
   const pairing = new PairingCodes();
-  const runtime = await openDeliveryRuntime(store.dir);
+  const runtime = await openDeliveryRuntime();
   const context: HelperContext = {
     port: options.port,
     maxBodyBytes: MAX_BODY_BYTES,
@@ -54,9 +54,10 @@ export async function startCommand(term: Terminal, options: StartOptions): Promi
   };
   if (state.pairing === null || options.forcePair) showCode();
   else out(term.info("already paired; run with --pair to pair a different browser"));
-  if (process.stdin.isTTY) {
+  const keys = process.stdin.isTTY ? createInterface({ input: process.stdin }) : null;
+  if (keys) {
     out(term.dim("press Enter for a new pairing code, Ctrl+C to stop"));
-    createInterface({ input: process.stdin }).on("line", showCode);
+    keys.on("line", showCode);
   }
 
   await new Promise<void>((resolve) => {
@@ -67,6 +68,7 @@ export async function startCommand(term: Terminal, options: StartOptions): Promi
     process.once("SIGTERM", stop);
   });
   out(term.info("stopping"));
+  keys?.close();
   await server.close();
   await runtime.close();
   return 0;

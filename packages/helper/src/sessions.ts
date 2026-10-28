@@ -10,7 +10,6 @@ const agentSchema = z.object({
   name: z.string().optional(),
   status: z.string().optional(),
   sessionId: z.string().optional(),
-  kind: z.string().optional(),
 });
 
 export interface SessionInfo {
@@ -19,7 +18,6 @@ export interface SessionInfo {
   status: string;
   cwd: string;
   sessionId: string | null;
-  kind: string | null;
   repo: RepoRef | null;
 }
 
@@ -43,7 +41,6 @@ export async function listSessions(run: RunCommand): Promise<SessionInfo[]> {
       status: agent.status ?? "unknown",
       cwd: agent.cwd,
       sessionId: agent.sessionId ?? null,
-      kind: agent.kind ?? null,
       repo: await repoForFolder(run, agent.cwd),
     })),
   );

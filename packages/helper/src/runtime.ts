@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { DEFAULT_INBOX_SOCKET_DIR } from "./constants.js";
 import { DeliveryService } from "./delivery.js";
 import { openSenderSocket, type SenderSocket } from "./socket.js";
-import { defaultStateDir } from "./state.js";
 import { claudeConfigDir } from "./transcript.js";
 
 export interface DeliveryRuntime {
@@ -13,10 +12,16 @@ export interface DeliveryRuntime {
   close(): Promise<void>;
 }
 
-export async function openDeliveryRuntime(
-  stateDir: string = defaultStateDir(),
-): Promise<DeliveryRuntime> {
-  const sender = await openSenderSocket(join(stateDir, "run"));
+/**
+ * A short per-user directory without spaces: the path is quoted in the
+ * `from="uds:..."` attribute and Unix socket paths are length-limited.
+ */
+export function senderSocketDir(uid: number | undefined = process.getuid?.()): string {
+  return join("/tmp", `squashflow-${uid ?? "user"}`);
+}
+
+export async function openDeliveryRuntime(): Promise<DeliveryRuntime> {
+  const sender = await openSenderSocket(senderSocketDir());
   const delivery = new DeliveryService({
     socketDir: DEFAULT_INBOX_SOCKET_DIR,
     claudeConfigDir: claudeConfigDir(),

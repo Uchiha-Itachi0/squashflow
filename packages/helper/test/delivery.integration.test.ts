@@ -2,9 +2,10 @@ import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DeliveryService } from "../src/delivery.js";
 import { projectFolderName } from "../src/transcript.js";
 import { fakeInbox, fakeSession, tempDir, type FakeInbox } from "./helpers.js";
-import { send, startTestHelper, type TestHelper } from "./http-helpers.js";
+import { EXTENSION_ORIGIN, send, startTestHelper, type TestHelper } from "./http-helpers.js";
 
 const session = fakeSession();
 const pinsBody = {
@@ -161,6 +162,91 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     expect(text).toContain("event: pin");
     expect(text).toContain(`"id":"${id}","number":1,"sessionPid":${session.pid}`);
     expect(text).toContain('"status":"seen"');
+  });
+
+  it("ends an open /events stream when another browser pairs", async () => {
+    const events: string[] = [];
+    let ended = false;
+    const stream = httpRequest({
+      host: "127.0.0.1",
+      port: helper.server.port,
+      path: "/events",
+      headers: helper.auth(),
+    });
+    stream.on("response", (res) => {
+      res.on("data", (chunk: Buffer) => events.push(chunk.toString("utf8")));
+      res.on("end", () => {
+        ended = true;
+      });
+    });
+    stream.end();
+    await waitFor(
+      () => Promise.resolve(events.length),
+      (count) => count > 0,
+    );
+    const { code } = helper.pairing.issue();
+    const paired = await send(helper.server.port, {
+      method: "POST",
+      path: "/pair",
+      headers: { host: `127.0.0.1:${helper.server.port}`, origin: EXTENSION_ORIGIN },
+      body: JSON.stringify({ code }),
+    });
+    expect(paired.status).toBe(200);
+    const token = paired.json<{ token: string }>().token;
+    const preview = await send(helper.server.port, {
+      method: "POST",
+      path: "/pins",
+      headers: helper.auth({ authorization: `Bearer ${token}` }),
+      body: JSON.stringify({ ...pinsBody, preview: true }),
+    });
+    const { pinId, digest } = preview.json<{ pinId: string; digest: string }>();
+    const sent = await send(helper.server.port, {
+      method: "POST",
+      path: "/pins",
+      headers: helper.auth({ authorization: `Bearer ${token}` }),
+      body: JSON.stringify({ ...pinsBody, pinId, digest }),
+    });
+    expect(sent.status).toBe(202);
+    expect(
+      await waitFor(
+        () => Promise.resolve(ended),
+        (value) => value,
+      ),
+    ).toBe(true);
+    expect(events.join("")).not.toContain(pinId);
+  });
+
+  it("keeps the preview when delivery fails, so it can be sent again", async () => {
+    await inbox.close();
+    const { pinId, digest } = (await post({ ...pinsBody, preview: true })).json<{
+      pinId: string;
+      digest: string;
+    }>();
+    expect((await post({ ...pinsBody, pinId, digest })).status).toBe(409);
+    inbox = await fakeInbox(join(dir.path, "socks", `${session.pid}.sock`));
+    expect((await post({ ...pinsBody, pinId, digest })).status).toBe(202);
+    await inbox.received;
+    expect(inbox.lines).toHaveLength(1);
+  });
+
+  it("stops following the transcript after the watch lifetime", async () => {
+    const delivery = new DeliveryService({
+      socketDir: join(dir.path, "socks"),
+      claudeConfigDir: join(dir.path, "claude"),
+      senderSocketPath: join(dir.path, "sender.sock"),
+      pollMs: 10,
+      watchMaxMs: 50,
+    });
+    try {
+      const draft = delivery.createDraft(session, "cli", undefined, [{ comment: "Fix it" }]);
+      const record = await delivery.deliver(draft);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await appendFile(transcript, `${peerRecord(draft.message)}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(delivery.get(record.id)?.status).toBe("sent");
+    } finally {
+      delivery.close();
+    }
   });
 
   it("refuses a tampered message after preview", async () => {

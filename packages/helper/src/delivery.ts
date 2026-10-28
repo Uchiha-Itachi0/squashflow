@@ -5,6 +5,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { TRANSCRIPT_WATCH_MAX_MS } from "./constants.js";
 import { buildMessage, digestMessage, wrapForInbox, type PinSource } from "./message.js";
 import type { PinInput } from "./schemas.js";
 import type { SessionInfo } from "./sessions.js";
@@ -55,6 +56,7 @@ export interface DeliveryOptions {
   senderSocketPath: string;
   now?: () => number;
   pollMs?: number;
+  watchMaxMs?: number;
 }
 
 export type PinListener = (pin: PinRecord) => void;
@@ -95,10 +97,11 @@ export class DeliveryService {
   }
 
   /**
-   * Take a previewed draft for delivery. The content is rebuilt and must hash to
+   * Find a previewed draft for delivery. The content is rebuilt and must hash to
    * the previewed digest, so only the exact message the user saw is delivered.
+   * The draft is consumed by a successful `deliver`.
    */
-  takeDraft(pinId: string, digest: string, pageUrl: string, pins: readonly PinInput[]): Draft {
+  verifyDraft(pinId: string, digest: string, pageUrl: string, pins: readonly PinInput[]): Draft {
     this.dropExpiredDrafts();
     const draft = this.drafts.get(pinId);
     if (!draft) throw new Error("No preview with that pin id; preview the message again.");
@@ -106,11 +109,20 @@ export class DeliveryService {
     if (digestMessage(rebuilt) !== digest || digest !== draft.digest) {
       throw new Error("The message changed since it was previewed; preview it again.");
     }
-    this.drafts.delete(pinId);
     return draft;
   }
 
   async deliver(draft: Draft): Promise<PinRecord> {
+    this.drafts.delete(draft.pinId);
+    try {
+      return await this.deliverOnce(draft);
+    } catch (error) {
+      this.drafts.set(draft.pinId, draft);
+      throw error;
+    }
+  }
+
+  private async deliverOnce(draft: Draft): Promise<PinRecord> {
     const { session } = draft;
     if (session.sessionId === null) {
       throw new Error(
@@ -147,7 +159,16 @@ export class DeliveryService {
       },
       this.options.pollMs,
     );
-    this.watches.set(draft.pinId, watch);
+    const expiry = setTimeout(() => {
+      this.stopWatch(draft.pinId);
+    }, this.options.watchMaxMs ?? TRANSCRIPT_WATCH_MAX_MS);
+    expiry.unref();
+    this.watches.set(draft.pinId, {
+      stop: () => {
+        clearTimeout(expiry);
+        watch.stop();
+      },
+    });
     return record;
   }
 
@@ -177,10 +198,12 @@ export class DeliveryService {
       statusLabel: STATUS_LABELS[status],
       updatedAt: new Date(this.now()).toISOString(),
     });
-    if (status === "seen") {
-      this.watches.get(pinId)?.stop();
-      this.watches.delete(pinId);
-    }
+    if (status === "seen") this.stopWatch(pinId);
+  }
+
+  private stopWatch(pinId: string): void {
+    this.watches.get(pinId)?.stop();
+    this.watches.delete(pinId);
   }
 
   private publish(record: PinRecord): void {

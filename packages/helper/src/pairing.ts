@@ -57,10 +57,6 @@ export class PairingCodes {
     return { code: formatCode(normalised), expiresAt };
   }
 
-  hasActiveCode(): boolean {
-    return this.active !== null && this.now() < this.active.expiresAt;
-  }
-
   /** Check a submitted code. A correct code is consumed; too many wrong ones lock it. */
   attempt(submitted: string): PairingAttempt {
     const active = this.active;

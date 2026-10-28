@@ -78,6 +78,11 @@ export interface SenderSocket {
  */
 export async function openSenderSocket(dir: string): Promise<SenderSocket> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
+  const info = await lstat(dir);
+  const uid = process.getuid?.();
+  if (!info.isDirectory() || (uid !== undefined && info.uid !== uid)) {
+    throw new Error(`${dir} is not a directory owned by the current user.`);
+  }
   await chmod(dir, 0o700);
   const path = join(dir, `helper-${process.pid}.sock`);
   await rm(path, { force: true });

@@ -27,4 +27,6 @@ export const DEFAULT_INBOX_SOCKET_DIR = "/tmp/cc-socks";
 export const SENDER_NAME = "squashflow";
 
 export const TRANSCRIPT_POLL_MS = 400;
+/** Stop following a pin's transcript after this long (session gone, held message rejected). */
+export const TRANSCRIPT_WATCH_MAX_MS = 30 * 60 * 1000;
 export const COMMAND_TIMEOUT_MS = 15_000;

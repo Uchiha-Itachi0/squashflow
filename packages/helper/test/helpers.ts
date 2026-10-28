@@ -55,7 +55,6 @@ export function fakeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
     status: "idle",
     cwd: "/work/demo",
     sessionId: "11111111-2222-3333-4444-555555555555",
-    kind: "interactive",
     repo: { host: "github.com", owner: "acme", name: "demo", fullName: "acme/demo" },
     ...overrides,
   };
