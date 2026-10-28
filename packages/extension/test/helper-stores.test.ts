@@ -98,6 +98,10 @@ describe("matchSessions", () => {
     status: "idle",
     cwd: `/w/${pid}`,
     repo,
+    title: null,
+    branch: null,
+    startedAt: null,
+    lastActiveAt: null,
   });
 
   it("preselects the one session on the page's repository", () => {

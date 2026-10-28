@@ -150,6 +150,7 @@ function sessionList(state: SendState, handlers: SendHandlers): HTMLElement | nu
         on: { change: () => handlers.onSelect(session.pid) },
       });
       radio.checked = session.pid === state.selectedPid;
+      const when = sessionTimes(session, Date.now());
       return h("label", { className: "session", title: session.cwd }, [
         radio,
         h("span", { className: "who" }, [
@@ -157,11 +158,40 @@ function sessionList(state: SendState, handlers: SendHandlers): HTMLElement | nu
           h("span", { className: `state ${session.status}`, text: session.status }),
           matching.has(session.pid) && h("span", { className: "tag", text: "this site" }),
         ]),
-        h("span", { className: "where", text: session.repo ?? "no repository" }),
+        session.title !== null && h("span", { className: "about", text: session.title }),
+        h("span", {
+          className: "where",
+          text: [session.repo ?? "no repository", session.branch].filter(Boolean).join(" · "),
+        }),
+        when !== "" && h("span", { className: "where", text: when }),
         h("span", { className: "where", text: session.cwd }),
       ]);
     }),
   );
+}
+
+/** "started 3h ago · active 2m ago", from what the helper knows; empty when it knows neither. */
+export function sessionTimes(session: PublicSession, now: number): string {
+  const started = timeAgo(session.startedAt, now);
+  const active = timeAgo(session.lastActiveAt, now);
+  return [started && `started ${started}`, active && `active ${active}`]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+function timeAgo(iso: string | null, now: number): string {
+  if (iso === null) return "";
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "";
+  const elapsed = Math.max(0, now - at);
+  if (elapsed < MINUTE_MS) return "just now";
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)}m ago`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`;
+  return `${Math.floor(elapsed / DAY_MS)}d ago`;
 }
 
 function siteLine(

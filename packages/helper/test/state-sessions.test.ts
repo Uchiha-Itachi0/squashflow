@@ -1,4 +1,4 @@
-import { stat, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RunCommand } from "../src/exec.js";
@@ -23,7 +23,14 @@ describe("StateStore", () => {
 });
 
 describe("listSessions", () => {
-  it("runs fixed argv and matches each folder to its repository", async () => {
+  it("runs fixed argv, matches each folder to its repository and reads its detail", async () => {
+    const config = await tempDir();
+    const folder = join(config.path, "projects", "-a");
+    await mkdir(folder, { recursive: true });
+    await writeFile(
+      join(folder, "s1.jsonl"),
+      `${JSON.stringify({ type: "ai-title", aiTitle: "Fix the violet buy button", sessionId: "s1" })}\n`,
+    );
     const calls: { file: string; args: readonly string[]; cwd?: string | undefined }[] = [];
     const run: RunCommand = (file, args, options) => {
       calls.push({ file, args, cwd: options?.cwd });
@@ -37,26 +44,47 @@ describe("listSessions", () => {
               status: "idle",
               sessionId: "s1",
               kind: "interactive",
+              startedAt: Date.UTC(2026, 9, 1, 12),
             },
             { pid: 2, cwd: "/b", status: "busy", sessionId: "s2" },
             { pid: "bad" },
           ]),
         );
       }
+      if (args[0] === "symbolic-ref") {
+        return options?.cwd === "/a"
+          ? Promise.resolve("feat/violet\n")
+          : Promise.reject(new Error("detached"));
+      }
       return options?.cwd === "/a"
         ? Promise.resolve("git@github.com:acme/alpha.git\n")
         : Promise.reject(new Error("no remote"));
     };
-    const sessions = await listSessions(run);
+    const sessions = await listSessions(run, config.path);
     expect(sessions.map((s) => [s.pid, s.name, s.repo?.fullName ?? null])).toEqual([
       [1, "alpha", "acme/alpha"],
       [2, "pid-2", null],
     ]);
+    expect(sessions[0]).toMatchObject({
+      title: "Fix the violet buy button",
+      branch: "feat/violet",
+      startedAt: "2026-10-01T12:00:00.000Z",
+    });
+    expect(sessions[0]?.lastActiveAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(sessions[1]).toMatchObject({
+      title: null,
+      branch: null,
+      startedAt: null,
+      lastActiveAt: null,
+    });
     expect(calls[0]).toEqual({ file: "claude", args: ["agents", "--json"], cwd: undefined });
     expect(calls.slice(1).map((c) => [c.file, c.args, c.cwd])).toEqual([
       ["git", ["remote", "get-url", "origin"], "/a"],
+      ["git", ["symbolic-ref", "--short", "-q", "HEAD"], "/a"],
       ["git", ["remote", "get-url", "origin"], "/b"],
+      ["git", ["symbolic-ref", "--short", "-q", "HEAD"], "/b"],
     ]);
+    await config.cleanup();
   });
 
   it("explains non-JSON output", async () => {

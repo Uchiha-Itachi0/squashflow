@@ -245,7 +245,7 @@ export class DeliveryService {
     const startOffset = await fileSize(transcript);
     const content = wrapForInbox(message, this.options.senderSocketPath);
     await writeToInbox(inboxSocketPath(this.options.socketDir, session.pid), content);
-    this.follow(pinId, transcript, startOffset);
+    this.follow(pinId, transcript, startOffset, session.repo?.fullName ?? null);
   }
 
   /** The session a pin was delivered to. */
@@ -310,8 +310,13 @@ export class DeliveryService {
    * watch lifetime (session gone, held message rejected). The lifetime restarts on
    * every new line, so a long piece of work in a busy session is still followed.
    */
-  private follow(pinId: string, transcript: string, startOffset: number): void {
-    const tracker = new ReplyTracker(pinId);
+  private follow(
+    pinId: string,
+    transcript: string,
+    startOffset: number,
+    repo: string | null,
+  ): void {
+    const tracker = new ReplyTracker(pinId, repo);
     const lifetime = this.options.watchMaxMs ?? TRANSCRIPT_WATCH_MAX_MS;
     const expire = (): void => {
       this.onQuiet(pinId);
@@ -390,8 +395,8 @@ export class DeliveryService {
   }
 
   /**
-   * The status a reply leads to. The blocked line wins over a link, since a session that
-   * reports no access may still mention other pull requests. A reply to a patch request
+   * The status a reply leads to. The blocked line wins over the fixed line, since a session
+   * that reports no access has not opened this pin's pull request. A reply to a patch request
    * that reports neither returns the pin to the block it was in.
    */
   private afterReply(current: PinRecord, reply: Reply, resume: PinBlock | undefined): PinRecord {

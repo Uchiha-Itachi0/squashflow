@@ -9,7 +9,17 @@ import type { StorageAreaLike } from "../src/store/pins";
 
 const TOKEN = "tok_0123456789abcdefghij";
 const PAGE = "https://shop.example.com/cart";
-const session = { pid: 42, name: "web", status: "idle", cwd: "/w/web", repo: "acme/web" };
+const session = {
+  pid: 42,
+  name: "web",
+  status: "idle",
+  cwd: "/w/web",
+  repo: "acme/web",
+  title: "Checkout contrast fix",
+  branch: "fix/contrast",
+  startedAt: "2026-10-01T12:00:00.000Z",
+  lastActiveAt: "2026-10-01T12:30:00.000Z",
+};
 
 type Route = (init: RequestInit) => { status: number; body: unknown } | "down";
 

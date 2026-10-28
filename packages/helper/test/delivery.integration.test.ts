@@ -2,13 +2,19 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
+import { fixedLine } from "@squashflow/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DeliveryService } from "../src/delivery.js";
 import { projectFolderName } from "../src/transcript.js";
 import { fakeInbox, fakeSession, tempDir, type FakeInbox } from "./helpers.js";
 import { EXTENSION_ORIGIN, send, startTestHelper, type TestHelper } from "./http-helpers.js";
 
-const session = fakeSession();
+const session = fakeSession({
+  title: "Checkout contrast fix",
+  branch: "fix/contrast",
+  startedAt: "2026-10-01T12:00:00.000Z",
+  lastActiveAt: "2026-10-01T12:30:00.000Z",
+});
 const pinsBody = {
   session: session.name,
   pageUrl: "https://example.com/pricing",
@@ -191,10 +197,11 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     const { id, message } = await previewAndSend();
     await appendFile(transcript, `${replyRecords("Too early: not about this pin")}\n`);
     await appendFile(transcript, `${peerRecord(message)}\n`);
-    await appendFile(
-      transcript,
-      `${replyRecords("Made it violet. https://github.com/acme/demo/pull/12 <img src=x onerror=alert(1)>")}\n`,
-    );
+    const replyText = [
+      "Made it violet. <img src=x onerror=alert(1)>",
+      fixedLine(id, "https://github.com/acme/demo/pull/12"),
+    ].join("\n");
+    await appendFile(transcript, `${replyRecords(replyText)}\n`);
     const read = async () =>
       (await send(helper.server.port, { path: `/pins/${id}`, headers: helper.auth() })).json<{
         pin: {
@@ -214,7 +221,7 @@ describe("delivery: POST /pins to Seen by Claude", () => {
       {
         id: `${id}-1`,
         from: "claude",
-        text: "Made it violet. https://github.com/acme/demo/pull/12 <img src=x onerror=alert(1)>",
+        text: replyText,
         truncated: false,
         at: expect.any(String) as string,
       },
@@ -239,7 +246,10 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     );
     const { id, message } = await previewAndSend();
     await appendFile(transcript, `${peerRecord(message)}\n`);
-    await appendFile(transcript, `${replyRecords("Done: https://github.com/acme/demo/pull/3")}\n`);
+    await appendFile(
+      transcript,
+      `${replyRecords(fixedLine(id, "https://github.com/acme/demo/pull/3"))}\n`,
+    );
     const text = await waitFor(
       () => Promise.resolve(events.join("")),
       (value) => value.includes('"status":"fixed"'),
@@ -248,7 +258,7 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     expect(text).toContain("event: pin");
     expect(text).toContain(`"id":"${id}","number":1,"sessionPid":${session.pid}`);
     expect(text).toContain('"status":"seen"');
-    expect(text).toContain('"text":"Done: https://github.com/acme/demo/pull/3"');
+    expect(text).toContain(`"text":"SQUASHFLOW-FIXED [${id}] https://github.com/acme/demo/pull/3"`);
     expect(text).toContain('"pullRequestUrl":"https://github.com/acme/demo/pull/3"');
   });
 
@@ -406,11 +416,21 @@ describe("delivery: POST /pins to Seen by Claude", () => {
     expect(inbox.lines).toHaveLength(0);
   });
 
-  it("lists sessions with their repository", async () => {
+  it("lists sessions with their repository and what tells them apart", async () => {
     const reply = await send(helper.server.port, { path: "/sessions", headers: helper.auth() });
     expect(reply.json()).toEqual({
       sessions: [
-        { pid: session.pid, name: "demo", status: "idle", cwd: "/work/demo", repo: "acme/demo" },
+        {
+          pid: session.pid,
+          name: "demo",
+          status: "idle",
+          cwd: "/work/demo",
+          repo: "acme/demo",
+          title: "Checkout contrast fix",
+          branch: "fix/contrast",
+          startedAt: "2026-10-01T12:00:00.000Z",
+          lastActiveAt: "2026-10-01T12:30:00.000Z",
+        },
       ],
     });
   });

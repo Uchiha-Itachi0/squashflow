@@ -54,6 +54,11 @@ export interface SendState {
   repo: string | null;
   /** Sessions on that repository. */
   matchingPids: readonly number[];
+  /**
+   * The session pins go to: the one the user picked, or else the only session on the
+   * site's repository. With no pick and not exactly one match, nothing is selected and
+   * Send stays hidden until the user picks.
+   */
   selectedPid: number | null;
   /** Why there is nothing to send to, with what to do instead. */
   note: string | null;
@@ -81,6 +86,9 @@ export class SendFlow {
     preview: null,
     busy: false,
   };
+
+  /** The session the user picked themselves, kept while it is still running. */
+  private pickedPid: number | null = null;
 
   constructor(private readonly hooks: SendFlowHooks) {}
 
@@ -147,6 +155,7 @@ export class SendFlow {
   }
 
   select(pid: number): void {
+    this.pickedPid = pid;
     this.update({ selectedPid: pid });
   }
 
@@ -163,7 +172,7 @@ export class SendFlow {
         this.fail(reply.failure);
         return;
       }
-      this.applySessions(this.current.sessions, repo, this.current.selectedPid);
+      this.applySessions(this.current.sessions, repo);
     });
   }
 
@@ -274,27 +283,24 @@ export class SendFlow {
       return;
     }
     const { sessions, repo } = reply.value;
-    const stillThere = sessions.some((session) => session.pid === this.current.selectedPid);
-    this.applySessions(sessions, repo, stillThere ? this.current.selectedPid : null);
+    this.applySessions(sessions, repo);
   }
 
-  private applySessions(
-    sessions: readonly PublicSession[],
-    repo: string | null,
-    selectedPid: number | null,
-  ): void {
+  private applySessions(sessions: readonly PublicSession[], repo: string | null): void {
     const { matching, preselectedPid } = matchSessions(sessions, repo);
+    if (!sessions.some((session) => session.pid === this.pickedPid)) this.pickedPid = null;
     this.update({
       sessions,
       repo,
       matchingPids: matching.map((session) => session.pid),
-      selectedPid: selectedPid ?? preselectedPid,
+      selectedPid: this.pickedPid ?? preselectedPid,
       note: sessionsNote(sessions, repo, matching.length),
     });
   }
 
   private applyStatus(status: ConnectionStatus): void {
     const paired = status.state === "paired";
+    if (!paired) this.pickedPid = null;
     this.update({
       connection: status,
       ...(paired ? {} : { sessions: [], matchingPids: [], selectedPid: null, preview: null }),
@@ -310,6 +316,7 @@ export class SendFlow {
     } else if (failure.kind === "unpaired") {
       this.applyStatus({ state: "unpaired", port, message: failure.message });
     } else if (failure.kind === "gone") {
+      this.pickedPid = null;
       this.update({ selectedPid: null, preview: null });
     }
     this.hooks.report(failure.message, "error");

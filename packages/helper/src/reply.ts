@@ -7,14 +7,15 @@
  * Code's `turn_duration` notice, or at the next prompt if that notice is missing.
  * Only text parts count (no thinking, tool calls or images), subagent (sidechain)
  * records are skipped, and the text is untrusted: it is capped and sent on as plain text.
- * A reply carrying the pin's blocked line (see `findBlockedReport`) reports that the
- * session lacks GitHub access.
+ * A reply carrying the pin's fixed line (see `findFixedPullRequest`) reports the pull
+ * request that fixes it; one carrying the pin's blocked line (see `findBlockedReport`)
+ * reports that the session lacks GitHub access. Any other link in a reply means nothing.
  */
 
 import {
   findBlockedReport,
+  findFixedPullRequest,
   MAX_REPLY_CHARS,
-  PULL_REQUEST_URL_PATTERN,
   type BlockedReport,
 } from "@squashflow/shared";
 import { classifyTranscriptLine } from "./transcript.js";
@@ -25,7 +26,7 @@ export const MAX_TRANSCRIPT_LINE_CHARS = 1024 * 1024;
 export interface Reply {
   text: string;
   truncated: boolean;
-  /** The first GitHub pull request link in the reply, if any. */
+  /** The pull request from the pin's fixed line, on the session's repository, if any. */
   pullRequestUrl: string | null;
   /** The session's report that it lacks GitHub access, when the reply carries the blocked line. */
   blocked: BlockedReport | null;
@@ -40,7 +41,11 @@ export class ReplyTracker {
   private messageId: string | null = null;
   private text = "";
 
-  constructor(private readonly pinId: string) {}
+  /** `repo` is the session's repository (`owner/name`); a fixed line must point into it. */
+  constructor(
+    private readonly pinId: string,
+    private readonly repo: string | null,
+  ) {}
 
   /** Whether the reply was found, or the turn ended without one; nothing more will come. */
   get finished(): boolean {
@@ -89,15 +94,11 @@ export class ReplyTracker {
       reply: {
         text: kept,
         truncated,
-        pullRequestUrl: findPullRequestUrl(kept),
+        pullRequestUrl: findFixedPullRequest(kept, this.pinId, this.repo),
         blocked: findBlockedReport(kept, this.pinId),
       },
     };
   }
-}
-
-export function findPullRequestUrl(text: string): string | null {
-  return PULL_REQUEST_URL_PATTERN.exec(text)?.[0] ?? null;
 }
 
 /** The end of the turn: Claude Code's turn timing notice, or the next prompt. */

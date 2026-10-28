@@ -1,6 +1,6 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { blockedLine, buildFollowUp } from "@squashflow/shared";
+import { blockedLine, buildFollowUp, fixedLine } from "@squashflow/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { projectFolderName } from "../src/transcript.js";
 import { fakeInbox, fakeSession, tempDir, type FakeInbox } from "./helpers.js";
@@ -148,7 +148,7 @@ describe("GitHub flow: blocked replies and follow-ups", () => {
     await appendFile(transcript, `${peerRecord(message)}\n`);
     await appendFile(
       transcript,
-      `${replyRecords("Pushed. https://github.com/acme/demo/pull/7")}\n`,
+      `${replyRecords(`Pushed.\n${fixedLine(id, "https://github.com/acme/demo/pull/7")}`)}\n`,
     );
     const fixed = await waitFor(
       () => read(id),

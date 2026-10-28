@@ -370,6 +370,10 @@ export function publicSession(session: SessionInfo): PublicSession {
     status: session.status,
     cwd: session.cwd,
     repo: session.repo?.fullName ?? null,
+    title: session.title,
+    branch: session.branch,
+    startedAt: session.startedAt,
+    lastActiveAt: session.lastActiveAt,
   };
 }
 

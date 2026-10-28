@@ -55,6 +55,11 @@ export const healthResponseSchema = z.object({
   version: z.string(),
 });
 
+/** Longest session title the helper reports. */
+export const MAX_SESSION_TITLE_CHARS = 80;
+/** Longest branch name the helper reports. */
+export const MAX_BRANCH_CHARS = 100;
+
 /** A running Claude Code session as `GET /sessions` reports it. */
 export const publicSessionSchema = z.object({
   pid: z.number().int().positive(),
@@ -64,6 +69,17 @@ export const publicSessionSchema = z.object({
   cwd: z.string(),
   /** `owner/repo` (or `host/owner/repo` off GitHub), or null when the folder has none. */
   repo: z.string().nullable(),
+  /**
+   * What the session is about: Claude Code's own title for it, or else the start of its
+   * first prompt. Untrusted plain text on one line, at most `MAX_SESSION_TITLE_CHARS`.
+   */
+  title: z.string().max(MAX_SESSION_TITLE_CHARS).nullable().default(null),
+  /** The git branch checked out in the session's folder; null when detached or unknown. */
+  branch: z.string().max(MAX_BRANCH_CHARS).nullable().default(null),
+  /** When the session started, ISO 8601. */
+  startedAt: z.string().max(40).nullable().default(null),
+  /** When the session last wrote to its transcript, ISO 8601. */
+  lastActiveAt: z.string().max(40).nullable().default(null),
 });
 
 export const sessionsResponseSchema = z.object({ sessions: z.array(publicSessionSchema) });
@@ -76,7 +92,7 @@ export const previewResponseSchema = z.object({
 
 /**
  * A delivered pin's status as the helper reports it: Sent, Approve in terminal, Seen by
- * Claude, Fixed (Claude replied with a pull request link) or Blocked (never picked up, or
+ * Claude, Fixed (Claude replied with the pin's fixed line, see fixed.ts) or Blocked (never picked up, or
  * the session reported it lacks GitHub access).
  * Resolved is the user's own mark and lives only in the extension.
  */
@@ -130,7 +146,7 @@ export const pinRecordSchema = z.object({
   updatedAt: z.string(),
   /** Claude's replies; a batch shares one record, so every pin in it shares the thread. */
   thread: z.array(threadMessageSchema).max(MAX_THREAD_MESSAGES).default([]),
-  /** The pull request link from Claude's reply, once the pin is Fixed. */
+  /** The pull request link from Claude's fixed line, once the pin is Fixed. */
   pullRequestUrl: pullRequestUrlSchema.nullable().default(null),
   /** Why the pin is Blocked, while it is. */
   blocked: pinBlockSchema.nullable().default(null),

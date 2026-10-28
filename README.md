@@ -79,7 +79,7 @@ The planned flow from first-time setup to a merged pull request:
 6. **Choose the session** if more than one matches, and review the exact message that will be sent.
 7. **Send.** The pin moves to *Sent*, then to *Seen by Claude* once the helper confirms the message arrived in the session.
 8. **Claude fixes it.** Your session edits the code, pushes a branch and opens a pull request using your `gh` login.
-9. **Reply on the pin.** Claude's reply and the pull request link appear on the pin, which moves to *Fixed*.
+9. **Reply on the pin.** Claude's reply and the pull request link appear on the pin, which moves to *Fixed* once the session reports the pull request it opened for that pin.
 10. **Review and merge** the pull request on GitHub as usual, then mark the pin *Resolved*.
 
 ## Send now vs batch
@@ -100,7 +100,7 @@ Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──
                 └──> Blocked               (the session never picked the message up, or it has no GitHub access)
 ```
 
-The status shows on the pin's marker and in the panel, and Squish's mood follows it: waiting while a pin is only Sent, working while Claude has it, squashed when it is Fixed, and blocked when it needs you. Claude's reply appears under the pin as plain text; a reply with a GitHub pull request link moves the pin to *Fixed* and links the pull request. A batch sent together shares one reply. Mark a pin **Resolved** once you are done with it, typically after merging, and **Reopen** it if not.
+The status shows on the pin's marker and in the panel, and Squish's mood follows it: waiting while a pin is only Sent, working while Claude has it, squashed when it is Fixed, and blocked when it needs you. Claude's reply appears under the pin with simple markdown (bold, italics, code, lists, `https` links) rendered safely. The message asks the session to end its reply with a `SQUASHFLOW-FIXED [<pin id>] <pull request link>` line once it has opened the pull request; only that line, for a pull request on the session's own repository, moves the pin to *Fixed* and links the pull request. A pull request link that merely appears in a reply, or a reply saying the pin landed in the wrong session, leaves the pin where it was. A batch sent together shares one reply. Mark a pin **Resolved** once you are done with it, typically after merging, and **Reopen** it if not.
 
 ## Fallbacks and edge cases
 
@@ -160,7 +160,7 @@ Then, with a Claude Code session open in one of your projects:
 
 ```sh
 squashflow doctor                 # checks Node, Claude Code version, git and the session inbox
-squashflow sessions               # lists running sessions with their folder, status and GitHub repository
+squashflow sessions               # lists running sessions with their title, branch, folder, status and GitHub repository
 squashflow send --session <name or pid> "Make the Buy button on /pricing blue"
 ```
 
@@ -213,7 +213,7 @@ To send pins straight to a session instead of pasting them:
 
 1. Start the helper with `squashflow` (see [Try the helper](#try-the-helper)). It prints a pairing code.
 2. In the panel's **Send to Claude Code** section, press **Pair with helper**, enter the code (and the port, if you started the helper with `--port`) and press **Pair**. You pair once; **Re-pair** and **Forget** are there if you need them.
-3. Pick the session to send to. Each one shows its name, whether it is idle or busy, its repository and its folder. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since.
+3. Pick the session to send to. Each one shows its name, whether it is idle or busy, what it is about (Claude Code's title for the session, or the start of its first prompt), its repository and branch, when it started and was last active, and its folder. Nothing is chosen for you unless exactly one session is on the repository remembered for this site, so **Send** appears only once a session is chosen. Tick **Remember: this site's code is `owner/repo`** and next time that session is chosen for you on this site, as long as it is the only one on that repository. **Refresh** picks up sessions you started since.
 4. Press **Send** on a pin, or **Send all**. The panel shows the exact message the session will receive; press **Send to claude@`<name>`** to deliver it, or **Cancel**. The panel then says it was sent, or why not in plain words (for example, the preview expired and needs previewing again).
 
 After sending, each pin shows its [status](#pin-status) on its marker and in the panel: *Sent*, *Seen by Claude* or *Approve in terminal*, then *Fixed* with Claude's reply and the pull request link. Press **Resolve** on a pin when you are done with it, or **Reopen** to undo that. The helper follows a pin until Claude replies; if the session's transcript goes quiet for 30 minutes before the pin is picked up (for example, the session exited), the pin shows *Blocked*. Status and replies arrive while pin mode is open on the page, and catch up the next time you open it.
