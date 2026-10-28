@@ -1,6 +1,6 @@
 # Squashflow architecture
 
-> **Planned design.** Nothing here is implemented yet. This document records the architecture and security decisions Squashflow is being built against. Names, endpoints and formats are expected to change as the code lands; when they do, this document is updated in the same pull request.
+> **Partly implemented.** The local helper (build step 1) is implemented in [`packages/helper`](../packages/helper); the sections on the helper, pairing, discovery, the message and delivery describe what it does today. Everything else (extension, dev overlay, replies, GitHub flow) is still the planned design. When names, endpoints or formats change, this document is updated in the same pull request.
 
 For a shorter overview, see the [README](../README.md). For the threat model and vulnerability reporting, see [SECURITY.md](../SECURITY.md).
 
@@ -55,73 +55,84 @@ flowchart TB
 
 ### Process and network
 
-- Started with `npx squashflow`. It runs in the foreground in a terminal so the user can see it and stop it.
-- Binds an HTTP server to `127.0.0.1` on a fixed default port, configurable. It never binds `0.0.0.0`, `::` or a LAN address.
+- Started with `npx squashflow` (or `squashflow start`). It runs in the foreground in a terminal so the user can see it and stop it with Ctrl+C. It is not published to npm yet; until then it runs from a clone (see the README).
+- Binds an HTTP server to `127.0.0.1` on port **47821** by default, changeable with `--port`. It refuses to bind anything else: not `0.0.0.0`, `::`, `localhost` or a LAN address.
 - Has no outbound network access of its own beyond what `claude`, `git` and `gh` do when it runs them.
+- Requires macOS or Linux. On Windows it prints that Windows is not supported yet and exits.
 
-### Endpoints (planned)
+### Endpoints
 
-All endpoints except pairing require the pairing token. All responses are JSON. Request bodies are size-capped.
+All endpoints except pairing require the pairing token as `Authorization: Bearer <token>`. All responses are JSON except the event stream. Request bodies are capped at 64 KiB.
 
 | Method and path | Purpose |
 | --- | --- |
-| `POST /pair` | Exchange the pairing code shown in the terminal for a pairing token. |
+| `POST /pair` | Exchange the pairing code shown in the terminal for a pairing token. Body: `{"code"}`. |
 | `GET /health` | Report that the helper is running and paired, plus its version. |
-| `GET /sessions` | List running Claude Code sessions with their folder and matched GitHub repository. |
-| `POST /pins` | Deliver one pin, or a batch, to a chosen session. Returns a delivery id. |
+| `GET /sessions` | List running Claude Code sessions: `pid`, `name`, `status`, `cwd` and the matched repository (`owner/repo`, or `null`). |
+| `POST /pins` | Preview, then deliver, one pin or a batch to a chosen session. See [Building the message](#building-the-message). |
 | `GET /pins/{id}` | Current status of a delivered pin. |
-| `GET /events` | Server-sent events stream of status changes and replies for the paired browser. |
+| `GET /events` | Server-sent events stream (`event: pin`) of status changes for the paired browser. Browsers' `EventSource` cannot send an `Authorization` header, so the extension reads it with a streaming `fetch`. |
 
 ### Request checks
 
 Every request is checked in this order, and rejected on the first failure:
 
-1. **Host.** The `Host` header must be exactly `127.0.0.1:<port>`. This defeats DNS rebinding, where a hostile domain is made to resolve to `127.0.0.1` but the browser still sends that domain in `Host`.
-2. **Origin.** The `Origin` header must be the extension's own `chrome-extension://<id>` origin. Requests from web page origins, or with no `Origin` on state-changing methods, are rejected.
-3. **Size.** The body must be within the configured limit before it is read in full.
-4. **Token.** The `Authorization` header must carry the current pairing token, compared in constant time.
-5. **Schema.** The body must validate against the endpoint's schema. Unknown fields are rejected.
+1. **Host.** The `Host` header must be exactly `127.0.0.1:<port>`. This defeats DNS rebinding, where a hostile domain is made to resolve to `127.0.0.1` but the browser still sends that domain in `Host`. Failure: `403`.
+2. **Origin.** The `Origin` header, when present, must be the paired extension's `chrome-extension://<id>` origin; for `POST /pair` it must be some `chrome-extension://<32-letter id>` origin, which is then recorded. Requests from web page origins, or with no `Origin` on state-changing methods, are rejected. Failure: `403`.
+3. **Size.** A declared `Content-Length` above 64 KiB is rejected before anything is read, and a body without a declared length is cut off as soon as it passes the cap. Failure: `413`.
+4. **Token.** The bearer token's SHA-256 is compared in constant time with the stored hash. Failure: `401`.
+5. **Schema.** The body must be JSON and validate against the endpoint's schema. Every object is strict: unknown fields are rejected, at the top level and nested. Failure: `400`.
 
 CORS responses name only the paired extension origin, never `*`.
 
 ## Pairing
 
-1. On start, if there is no paired browser, the helper prints a short random pairing code in the terminal.
+1. On start, if there is no paired browser (or with `--pair`), the helper prints a pairing code in the terminal, such as `BGV9-7X3Y`. Pressing Enter in the helper's terminal prints a fresh code.
 2. The user enters the code in the extension, which sends it to `POST /pair`.
-3. The helper checks the code, then returns a random, high-entropy pairing token and records the extension origin.
+3. The helper checks the code, then returns a random pairing token (32 bytes, base64url) and records the extension origin.
 4. The extension keeps the token in extension storage, which web pages cannot read.
 
-Pairing codes are single-use, expire after a short time, and allow a small number of attempts before a new code is required. Re-pairing replaces the old token, which is how a user revokes a browser.
+Pairing codes are 8 characters from an alphabet without look-alike characters, single-use, expire after **5 minutes**, and allow **5 attempts**; after that the code is void and a new one must be printed in the terminal. Re-pairing replaces the old token, which is how a user revokes a browser.
+
+The helper stores only the SHA-256 hash of the token, with the paired origin, in `~/.squashflow/state.json` (or under `$SQUASHFLOW_HOME`). The directory is mode `0700` and the file `0600`.
 
 ## Session discovery and repository matching
 
-1. The helper runs `claude agents --json` to list running Claude Code sessions and their working folders.
-2. For each folder it runs `git remote get-url origin` and normalises the result (SSH or HTTPS) to an `owner/repo` name.
-3. For the page being reviewed, the extension asks for sessions. Matching uses the repository a page is known to belong to: the dev overlay reports it directly for local apps, and for live sites the user picks or remembers a site-to-repository mapping.
+1. The helper runs `claude agents --json`, which lists running sessions with `pid`, `cwd`, `name`, `status` (`idle` or `busy`) and `sessionId`.
+2. For each folder it runs `git remote get-url origin` and normalises the result (SSH, `scp`-style, HTTPS or `git://`) to an `owner/repo` name. Remotes on other hosts keep the host, as `host/owner/repo`; anything else counts as no repository.
+3. For the page being reviewed, the extension asks for sessions. Matching uses the repository a page is known to belong to: the dev overlay reports it directly for local apps, and for live sites the user picks or remembers a site-to-repository mapping. (Planned; the helper already reports each session's repository.)
 4. If exactly one session matches, it is preselected. If several match, the user picks. If none match, the copy fallback is offered.
 
-Commands are run with fixed argument lists, never through a shell, and with the session folder as the working directory.
+Commands are run with `execFile` and fixed argument lists, never through a shell, with the session folder as the working directory and a timeout.
 
 ## Building the message
 
 A message delivered to a session has a fixed structure:
 
-1. **Provenance header.** States that this is a Squashflow pin from the browser, with the page URL. It never claims to be typed by the user in the terminal or to come from anywhere else.
-2. **The user's comment.** The only instructions in the message.
-3. **Page context, fenced as data.** Selectors, element text, attributes, computed styles, source file and line (from the dev overlay), and region screenshots, inside a clearly delimited block labelled as untrusted page content.
+1. **Provenance header.** States that this is Squashflow pin `[sf-<12 hex>]` from the user's browser, delivered by the local helper, not typed in the terminal, with the page URL. Pins sent with `squashflow send` say so instead. It never claims to be typed by the user in the terminal or to come from anywhere else.
+2. **The user's comment.** The only instructions in the message. Batches number the comments.
+3. **Page context, fenced as data.** Selectors, element text, attributes, computed styles and source file and line (from the dev overlay), as JSON inside `<untrusted-page-context>` with a line telling Claude it is untrusted data and not to follow instructions in it. Every `<`, `>` and `&` in the JSON is escaped, so page content can never close the fence or the surrounding wrapper. Region screenshots are not supported yet.
 4. **Requested outcome.** Fix the issue on a new branch, open a pull request, and reply with a summary and the link.
 
-The extension renders this exact message in a preview before sending. The helper delivers the previewed message unchanged; if the content changes, it must be previewed again. Batches are one message containing several numbered pins.
+The previewed message is the delivered message:
+
+1. `POST /pins` with `"preview": true` builds the message and returns it with its `pinId` and SHA-256 `digest`, without delivering anything.
+2. The extension shows that exact message. To send it, it repeats the request with the `pinId` and `digest` instead of `preview`.
+3. The helper rebuilds the message from the request and delivers it only if it hashes to the previewed digest, the preview is unused and less than 10 minutes old, and the session is the same. Otherwise the user must preview again.
+
+`squashflow send` uses the same path: it prints the message, asks `Send this message? [y/N]`, and delivers only on `y`.
 
 ## Delivery and confirmation
 
-1. The helper writes the message to the chosen session's local inbox socket. The socket is owned by, and writable only by, the user's OS account; the helper refuses a socket with unexpected ownership or permissions.
-2. The pin moves to **Sent**.
-3. The helper watches the session's transcript. When the message appears in it, the pin moves to **Seen by Claude**.
-4. If Claude Code is holding the message for approval (for example, in bypass-permissions mode), the pin moves to **Approve in terminal** until the user approves it there.
-5. If the session is busy, the message is queued by Claude Code and handled between steps; the pin stays **Sent** until it appears in the transcript.
-6. When Claude replies, the helper picks the reply out of the transcript and sends it to the extension as a thread message. A reply that includes a pull request link moves the pin to **Fixed**.
-7. The user marks the pin **Resolved**, typically after merging.
+1. The helper wraps the message as `<cross-session-message from="uds:<helper socket>" from-name="squashflow">…</cross-session-message>` and writes it as one NDJSON line, `{"type":"user","message":{"role":"user","content":…}}`, to the session's inbox socket at `/tmp/cc-socks/<pid>.sock`. The helper socket named in `from` is a real socket it listens on, `~/.squashflow/run/helper-<pid>.sock`. The session shows it as "Message from @squashflow" and treats it as a request from another session, never as the user's own typing; Claude Code's permissions still apply.
+2. Before writing, the helper checks the inbox path with `lstat` and refuses anything that is not a socket, is not owned by the current user, or is not mode `0600`. A symlink is refused, not followed. `--bare` sessions have no inbox socket and cannot receive pins.
+3. The pin moves to **Sent**.
+4. The socket sends no acknowledgement, so the helper watches the session's transcript, `<config>/projects/<cwd with every non-alphanumeric character as ->/<sessionId>.jsonl`, where `<config>` is `$CLAUDE_CONFIG_DIR` or `~/.claude`. It reads only lines appended after delivery and matches them on the pin id.
+5. When a `user` record with a peer origin carrying the pin id appears, the pin moves to **Seen by Claude**.
+6. If Claude Code is holding the message for approval (a session in bypass-permissions mode records a "Held peer message" notice), the pin moves to **Approve in terminal** until the user approves it there, then to **Seen by Claude**.
+7. If the session is busy, Claude Code queues the message and handles it between steps; the pin stays **Sent** until it appears in the transcript.
+8. When Claude replies, the helper picks the reply out of the transcript and sends it to the extension as a thread message. A reply that includes a pull request link moves the pin to **Fixed**. (Planned.)
+9. The user marks the pin **Resolved**, typically after merging. (Planned.)
 
 ```text
 Draft ──> Sent ──> Seen by Claude ──> Fixed (reply + PR link) ──> Resolved
@@ -166,13 +177,17 @@ Copy detail levels:
 
 ## Local data
 
-- Helper state (pairing token hash, extension origin, settings) is stored in a file readable and writable only by the user.
+- Helper state (pairing token hash, extension origin) is stored in `~/.squashflow/state.json`, readable and writable only by the user.
 - Pins and threads are stored in the extension's local storage.
 - Nothing is sent to a Squashflow server, because there is none, and there is no telemetry.
 
+## Minimum Claude Code version
+
+The helper needs Claude Code **2.1.224** or later: the first release with the session inbox socket and the `claude agents --json` fields above. The inbox wire format is not a documented public interface, so the minimum is pinned and `squashflow doctor` checks it, along with Node.js, `git`, `claude agents --json` and the inbox socket folder.
+
 ## Build order
 
-1. Helper: list sessions, match repositories, send, confirm.
+1. Helper: list sessions, match repositories, send, confirm. (Done.)
 2. Overlay with pins and context, plus copy.
 3. Session picker.
 4. Claude replies and pin status.
@@ -181,6 +196,5 @@ Copy detail levels:
 
 ## Open questions
 
-- The minimum Claude Code version, which depends on the session inbox and `claude agents --json` interfaces the helper relies on.
 - How live sites are mapped to repositories when there is no dev overlay.
 - How region screenshots are stored and passed to the session.

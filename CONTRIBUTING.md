@@ -1,16 +1,26 @@
 # Contributing to Squashflow
 
-Thanks for your interest in Squashflow. The project is in early development and there is no product code yet, so the most useful contributions right now are feedback on the [planned design](docs/architecture.md) and the [security model](SECURITY.md). Open an issue to start a discussion.
+Thanks for your interest in Squashflow. The project is in early development: only the local helper exists so far, so the most useful contributions right now are feedback on the [design](docs/architecture.md) and the [security model](SECURITY.md), and improvements to the helper. Open an issue to start a discussion.
 
 By taking part, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
-There is nothing to build yet. Once the first package lands, this section will cover:
+Squashflow is a TypeScript monorepo using pnpm workspaces. Packages live in `packages/`; today that is `packages/helper` (published name `squashflow`).
 
-- the required Node.js version and package manager,
-- how to install dependencies from the lockfile,
-- how to run the helper, the extension and the tests locally.
+- Node.js 22.12 or later for development (`.nvmrc` pins the current LTS). The helper itself runs on Node.js 20.19 or later.
+- pnpm, at the version in the root `package.json` `packageManager` field. With Corepack: `corepack pnpm <command>`.
+
+```sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm lint        # eslint and prettier
+corepack pnpm typecheck
+corepack pnpm test        # vitest
+corepack pnpm build
+node packages/helper/dist/cli.js doctor
+```
+
+The tests never touch real Claude Code sessions: they use a fake inbox socket and a fake transcript. If you test against a real session, start a throwaway one in a temporary folder for that purpose; never send test messages to sessions you are using for real work.
 
 ## Branches and pull requests
 
