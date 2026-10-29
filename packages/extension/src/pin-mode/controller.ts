@@ -363,6 +363,7 @@ export class PinMode {
         id: pin.id,
         number: index + 1,
         at: anchorOf(pin),
+        parts: partsOf(pin),
         status:
           tracking === undefined
             ? null
@@ -404,6 +405,17 @@ function anchorOf(pin: StoredPin): Rect {
   const live = context.selector ? safeQuery(context.selector) : null;
   if (live !== null) return pageRect(live);
   return context.rect ?? { x: 16, y: 16, width: 0, height: 0 };
+}
+
+/** Where each element of a multi-element pin is: live if still there, else where it was. */
+function partsOf(pin: StoredPin): Rect[] {
+  const { context } = pin;
+  if (context.kind !== "elements") return [];
+  return [context, ...(context.elements ?? [])].flatMap((element) => {
+    const live = element.selector ? safeQuery(element.selector) : null;
+    if (live !== null) return [pageRect(live)];
+    return element.rect === undefined ? [] : [element.rect];
+  });
 }
 
 function safeQuery(selector: string): Element | null {

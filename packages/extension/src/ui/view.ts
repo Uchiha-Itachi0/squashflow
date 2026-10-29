@@ -19,6 +19,8 @@ export interface MarkerView {
   id: string;
   number: number;
   at: Rect;
+  /** Each element of a multi-element pin, in the order picked; empty for other pins. */
+  parts: readonly Rect[];
   /** Null while the pin is a draft. */
   status: { status: ShownStatus; label: string } | null;
 }
@@ -134,11 +136,7 @@ export class PinView {
 
   showSelection(boxes: readonly Rect[]): void {
     this.selectionLayer.replaceChildren(
-      ...boxes.map((box) => {
-        const element = h("div", { className: "box selected" });
-        placeBox(element, box);
-        return element;
-      }),
+      ...boxes.map((box, index) => partBox("box selected", box, String(index + 1))),
     );
   }
 
@@ -148,7 +146,11 @@ export class PinView {
   }
 
   renderMarkers(markers: readonly MarkerView[], onOpen: (id: string) => void): void {
+    const parts = markers.flatMap(({ number, parts }) =>
+      parts.map((box, index) => partBox("box part", box, `${number}.${index + 1}`)),
+    );
     this.markerLayer.replaceChildren(
+      ...parts,
       ...markers.map(({ id, number, at, status }) => {
         const done = status?.status === "fixed" || status?.status === "resolved";
         const label = `Pin ${number}: ${status === null ? "draft" : status.label}`;
@@ -293,6 +295,13 @@ function nextPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   });
+}
+
+/** An outlined element with its number, so each element of a multi pin can be told apart. */
+function partBox(className: string, box: Rect, tag: string): HTMLElement {
+  const element = h("div", { className }, [h("span", { className: "tag", text: tag })]);
+  placeBox(element, box);
+  return element;
 }
 
 function showBox(element: HTMLElement, box: Rect | null): void {

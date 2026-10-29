@@ -47,6 +47,20 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   border-radius: 6px;
 }
 .box.selected { border-style: dashed; }
+.box.part { border-width: 1px; border-style: dashed; background: none; }
+.box .tag {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #FFFFFF;
+  font: 500 10px/18px var(--mono);
+  text-align: center;
+}
 .box.area { border-style: dashed; border-radius: 12px; }
 
 .marker {

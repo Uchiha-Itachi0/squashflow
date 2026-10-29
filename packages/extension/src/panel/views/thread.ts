@@ -130,7 +130,7 @@ function details(pin: StoredPin, actions: PanelActions): HTMLElement {
       : `${context.source.file}${context.source.line === undefined ? "" : `:${context.source.line}`}`;
   const rows: [string, string | undefined][] = [
     ["Page", shortUrl(pin.pageUrl)],
-    ["Element", context.selector],
+    ...elementRows(context),
     ["Text", context.selectedText],
     ["Source", source],
     [
@@ -159,6 +159,15 @@ function details(pin: StoredPin, actions: PanelActions): HTMLElement {
           on: { click: () => actions.copyScreenshot(pin.id) },
         }),
       ]),
+  ]);
+}
+
+/** One row per element: a multi-element pin lists each, numbered as on the page. */
+function elementRows(context: StoredPin["context"]): [string, string | undefined][] {
+  if (context.kind !== "elements") return [["Element", context.selector]];
+  return [context, ...(context.elements ?? [])].map((element, index) => [
+    `Element ${index + 1}`,
+    element.selector,
   ]);
 }
 

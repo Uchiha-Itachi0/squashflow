@@ -5,6 +5,9 @@
  * The reply is the text of Claude's last assistant message in the turn that handled
  * the pin: the turn starts at the peer record carrying the pin id and ends at Claude
  * Code's `turn_duration` notice, or at the next prompt if that notice is missing.
+ * Work handed on (to a worker, or a later turn) often settles the pin turns later, so
+ * until a reply carries the pin's fixed or blocked line the tracker keeps reading, and
+ * the last message of any later turn that names the pin id is a reply too.
  * Only text parts count (no thinking, tool calls or images), subagent (sidechain)
  * records are skipped, and the text is untrusted: it is capped and sent on as plain text.
  * A reply carrying the pin's fixed line (see `findFixedPullRequest`) reports the pull
@@ -34,7 +37,7 @@ export interface Reply {
 
 export type PinEvent = { kind: "seen" } | { kind: "held" } | { kind: "reply"; reply: Reply };
 
-type Phase = "delivered" | "turn" | "done";
+type Phase = "delivered" | "turn" | "later" | "done";
 
 export class ReplyTracker {
   private phase: Phase = "delivered";
@@ -47,7 +50,7 @@ export class ReplyTracker {
     private readonly repo: string | null,
   ) {}
 
-  /** Whether the reply was found, or the turn ended without one; nothing more will come. */
+  /** Whether a reply settled the pin (fixed or blocked); nothing more will come. */
   get finished(): boolean {
     return this.phase === "done";
   }
@@ -84,20 +87,23 @@ export class ReplyTracker {
   }
 
   private finish(): PinEvent | null {
-    this.phase = "done";
+    const handled = this.phase === "turn";
+    this.phase = "later";
     const text = cleanText(this.text);
-    if (text === "") return null;
+    this.text = "";
+    this.messageId = null;
+    // After the turn that handled the pin, only a reply that names the pin is about it.
+    if (text === "" || (!handled && !text.includes(this.pinId))) return null;
     const truncated = text.length > MAX_REPLY_CHARS;
     const kept = truncated ? text.slice(0, MAX_REPLY_CHARS) : text;
-    return {
-      kind: "reply",
-      reply: {
-        text: kept,
-        truncated,
-        pullRequestUrl: findFixedPullRequest(kept, this.pinId, this.repo),
-        blocked: findBlockedReport(kept, this.pinId),
-      },
+    const reply: Reply = {
+      text: kept,
+      truncated,
+      pullRequestUrl: findFixedPullRequest(kept, this.pinId, this.repo),
+      blocked: findBlockedReport(kept, this.pinId),
     };
+    if (reply.pullRequestUrl !== null || reply.blocked !== null) this.phase = "done";
+    return { kind: "reply", reply };
   }
 }
 

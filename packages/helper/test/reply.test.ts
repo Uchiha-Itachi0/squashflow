@@ -188,15 +188,59 @@ describe("ReplyTracker", () => {
     expect(reply?.text).toBe("Done <b>bold</b>[31m");
   });
 
-  it("finishes after the reply and ignores garbage lines", () => {
+  it("finishes once a reply settles the pin, and ignores garbage lines", () => {
     const tracker = new ReplyTracker(pin, "acme/demo");
     expect(tracker.feed("not json")).toBeNull();
     tracker.feed(peer(pin));
     expect(tracker.feed("{broken")).toBeNull();
-    tracker.feed(assistant("m", [text("Done.")]));
+    tracker.feed(assistant("m", [text("Working on it.")]));
+    tracker.feed(turnEnd);
     expect(tracker.finished).toBe(false);
+    tracker.feed(
+      assistant("n", [text(`SQUASHFLOW-FIXED [${pin}] https://github.com/acme/demo/pull/3`)]),
+    );
     tracker.feed(turnEnd);
     expect(tracker.finished).toBe(true);
-    expect(tracker.feed(assistant("n", [text("More")]))).toBeNull();
+    expect(tracker.feed(assistant("o", [text(`More on ${pin}`)]))).toBeNull();
+    expect(tracker.feed(turnEnd)).toBeNull();
+  });
+
+  it("follows a pin a busy session took in mid-turn through to its fix in a later turn", () => {
+    // The captain's case: an orchestrating session took the pin in mid-turn, handed it to a
+    // worker, and reported the fix turns later.
+    const absorbed = JSON.stringify({
+      type: "attachment",
+      attachment: {
+        type: "queued_command",
+        prompt: `Squashflow pin [${pin}] ...`,
+        origin: { kind: "peer", name: "squashflow", body: `Squashflow pin [${pin}] ...` },
+      },
+    });
+    const fixed = [
+      "The footer name is gone; the PR is merged.",
+      "",
+      `SQUASHFLOW-FIXED [${pin}] https://github.com/acme/demo/pull/43`,
+    ].join("\n");
+    const events = run([
+      assistant("busy", [text("Earlier work in the same turn.")]),
+      absorbed,
+      assistant("a", [text("A new pin came in; handing it to a worker.")]),
+      turnEnd,
+      prompt("something else"),
+      assistant("b", [text("Unrelated answer https://github.com/acme/demo/pull/2")]),
+      turnEnd,
+      assistant("c", [text(fixed)]),
+      turnEnd,
+    ]);
+    expect(events.map((event) => event.kind)).toEqual(["seen", "reply", "reply"]);
+    const replies = events.flatMap((event) => (event.kind === "reply" ? [event.reply] : []));
+    expect(replies[0]).toMatchObject({
+      text: "A new pin came in; handing it to a worker.",
+      pullRequestUrl: null,
+    });
+    expect(replies[1]).toMatchObject({
+      text: fixed,
+      pullRequestUrl: "https://github.com/acme/demo/pull/43",
+    });
   });
 });
