@@ -1,22 +1,13 @@
 /**
- * The pin mode script's end of the port the side panel opens to the page. The panel
- * says where pins go and can stop pin mode; the page tells it the page URL, Go, a pin
- * to send now, and a pin or tab to open. With no panel open, the page asks the service
- * worker to open one.
+ * The pin mode script's end of the port the side panel opens to the page. The panel can
+ * stop pin mode; the page tells it the page URL, a pin to send now, and a pin to open.
+ * With no panel open, the page asks the service worker to open one.
  */
 
-import {
-  OPEN_PANEL,
-  PANEL_PORT,
-  PIN_MODE_STARTED,
-  type PageToPanel,
-  type PanelToPage,
-  type ToolbarTarget,
-} from "../panel/protocol";
+import { OPEN_PANEL, PANEL_PORT, PIN_MODE_STARTED, type PageToPanel } from "../panel/protocol";
 
 export interface PanelLinkHooks {
   pageUrl: () => string;
-  onTarget: (target: ToolbarTarget | null) => void;
   onStop: () => void;
 }
 
@@ -32,14 +23,10 @@ export class PanelLink {
     if (port.name !== PANEL_PORT || port.sender?.id !== chrome.runtime.id) return;
     this.port?.disconnect();
     this.port = port;
-    port.onMessage.addListener((message: PanelToPage) => {
-      if (message.type === "target") this.hooks.onTarget(message.target);
-      else this.hooks.onStop();
-    });
+    // The panel's only message (`PanelToPage`) is stop.
+    port.onMessage.addListener(() => this.hooks.onStop());
     port.onDisconnect.addListener(() => {
-      if (this.port !== port) return;
-      this.port = null;
-      this.hooks.onTarget(null);
+      if (this.port === port) this.port = null;
     });
     port.postMessage({ type: "hello", url: this.hooks.pageUrl() } satisfies PageToPanel);
     if (this.pending !== null) port.postMessage(this.pending);

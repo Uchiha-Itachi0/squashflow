@@ -44,10 +44,8 @@ describe("what the page may tell the side panel", () => {
   it("accepts the page's messages", () => {
     for (const message of [
       { type: "hello", url: "https://shop.example.com/cart" },
-      { type: "go" },
       { type: "send-pin", pinId: "sf-0123456789ab" },
       { type: "open-pin", pinId: "sf-0123456789ab" },
-      { type: "open-tab", tab: "sessions" },
     ]) {
       expect(pageToPanelSchema.safeParse(message).success).toBe(true);
     }
@@ -57,9 +55,10 @@ describe("what the page may tell the side panel", () => {
     for (const message of [
       { type: "hello", url: "javascript:alert(1)" },
       { type: "send-pin", pinId: "../../token" },
-      { type: "open-tab", tab: "secrets" },
+      { type: "go" },
+      { type: "open-tab", tab: "sessions" },
       { type: "send", outgoing: {} },
-      { type: "go", extra: true },
+      { type: "open-pin", pinId: "sf-0123456789ab", extra: true },
     ]) {
       expect(pageToPanelSchema.safeParse(message).success).toBe(false);
     }

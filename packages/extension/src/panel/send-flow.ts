@@ -144,7 +144,7 @@ export class SendFlow {
       this.applyStatus(reply.value);
       if (reply.value.state !== "paired") return;
       this.update({ pairingOpen: false });
-      this.hooks.report("Paired with the helper.", "ok");
+      this.hooks.report("Connected.", "ok");
       await this.loadSessions();
     });
   }
@@ -157,7 +157,7 @@ export class SendFlow {
         return;
       }
       this.applyStatus(reply.value);
-      this.hooks.report("Forgot the pairing. Pins can still be copied.", "ok");
+      this.hooks.report("Disconnected. You can still copy pins.", "ok");
     });
   }
 
@@ -218,7 +218,7 @@ export class SendFlow {
       this.current.sessions.find((candidate) => candidate.name === tracking.sessionName);
     if (this.current.connection.state !== "paired" || session === undefined) {
       this.hooks.report(
-        `claude@${tracking.sessionName} is not running any more. Copy the pin instead, or send it again to another session.`,
+        `${tracking.sessionName} is not running any more. Copy the pin instead, or send it again to another session.`,
         "error",
       );
       return;
@@ -302,7 +302,7 @@ export class SendFlow {
       const count = preview.outgoing.pins.length;
       const what =
         preview.followUp !== null ? "your reply" : count === 1 ? "1 pin" : `${count} pins`;
-      this.hooks.report(`Sent ${what} to claude@${reply.value.sessionName}.`, "ok");
+      this.hooks.report(`Sent ${what} to ${reply.value.sessionName}.`, "ok");
     });
   }
 
@@ -319,7 +319,7 @@ export class SendFlow {
         this.fail(reply.failure);
         return;
       }
-      const to = `claude@${reply.value.sessionName}`;
+      const to = reply.value.sessionName;
       this.hooks.report(
         preview.action === "patch"
           ? `Asked ${to} for the patch. Press Copy the patch again once it replies.`

@@ -1,6 +1,6 @@
 /** A tiny element builder. Text always goes in as text, never as markup. */
 
-type Child = Node | string | null | undefined | false;
+export type Child = Node | string | null | undefined | false;
 
 export interface ElementProps {
   className?: string;

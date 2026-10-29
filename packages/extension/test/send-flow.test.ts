@@ -98,7 +98,7 @@ describe("SendFlow pairing", () => {
     expect(send.state.connection).toEqual({ state: "paired", port: 5123, version: "0.1.0" });
     expect(send.state.pairingOpen).toBe(false);
     expect(send.state.sessions).toEqual([web]);
-    expect(reports).toContainEqual(["Paired with the helper.", "ok"]);
+    expect(reports).toContainEqual(["Connected.", "ok"]);
   });
 
   it("keeps the pairing form open and explains a wrong code", async () => {
@@ -317,7 +317,7 @@ describe("SendFlow preview then send", () => {
       localPinIds: ["sf-aaaaaaaaaaaa", "sf-bbbbbbbbbbbb"],
     });
     expect(send.state.preview).toBeNull();
-    expect(reports.at(-1)).toEqual(["Sent 2 pins to claude@web.", "ok"]);
+    expect(reports.at(-1)).toEqual(["Sent 2 pins to web.", "ok"]);
   });
 
   it("drops the preview and says so when the helper reports it expired", async () => {
@@ -451,7 +451,7 @@ describe("SendFlow follow-up from a pin's thread", () => {
       localPinIds: ["sf-aaaaaaaaaaaa"],
       followUp: "Darker please",
     });
-    expect(reports.at(-1)).toEqual(["Sent your reply to claude@api.", "ok"]);
+    expect(reports.at(-1)).toEqual(["Sent your reply to api.", "ok"]);
   });
 
   it("says so when the pin's session is no longer running", async () => {
@@ -460,7 +460,7 @@ describe("SendFlow follow-up from a pin's thread", () => {
     await send.start();
     await send.previewReply(pin("sf-aaaaaaaaaaaa", "x"), tracking, "Again");
     expect(worker.requests.some((request) => request.type === "preview")).toBe(false);
-    expect(reports.at(-1)?.[0]).toMatch(/claude@api is not running any more/);
+    expect(reports.at(-1)?.[0]).toMatch(/api is not running any more/);
   });
 
   it("names the earlier message and quotes a long comment only in part", () => {

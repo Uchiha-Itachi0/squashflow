@@ -214,7 +214,7 @@ describe("GitHubActions", () => {
       digest: DIGEST,
     });
     expect(send.state.preview).toBeNull();
-    expect(reports).toContain('Sent "Retry after logging in" to claude@web.');
+    expect(reports).toContain('Sent "Retry after logging in" to web.');
   });
 
   it("previews a fork follow-up, and sends nothing when cancelled", async () => {

@@ -110,9 +110,11 @@ export async function pinElement(page: Page, selector: string, comment: string):
   await page.getByRole("button", { name: "Save pin" }).click();
 }
 
-/** Pair the side panel with the helper from the Connect screen. */
+/** Pair the side panel with the helper: the port in Settings, then the code on the inbox. */
 export async function pair(panel: Page, code: string, port: number): Promise<void> {
-  await panel.getByRole("textbox", { name: "Type the code it shows" }).fill(code);
-  await panel.getByRole("spinbutton", { name: "Helper port" }).fill(String(port));
+  await panel.getByRole("button", { name: "Settings" }).click();
+  await panel.getByRole("spinbutton", { name: "Port" }).fill(String(port));
+  await panel.getByRole("button", { name: "Back to all pins" }).click();
+  await panel.getByRole("textbox", { name: "Type the code it prints" }).fill(code);
   await panel.getByRole("button", { name: "Connect", exact: true }).click();
 }

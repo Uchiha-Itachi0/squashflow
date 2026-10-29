@@ -160,27 +160,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .tb:hover { background: #24242C; color: #FFFFFF; }
 .tb[aria-pressed="true"], .tb[aria-checked="true"] { background: #2A2A33; color: #FFFFFF; }
 .tb svg { width: 16px; height: 16px; flex-shrink: 0; }
-.tb.session { border: 1px solid #3A3A44; max-width: 220px; }
-.tb.session .label { overflow: hidden; text-overflow: ellipsis; }
-.dot { width: 7px; height: 7px; border-radius: 99px; background: #85858C; flex-shrink: 0; }
-.dot.idle { background: #4CC38A; }
-.dot.busy { background: #D08A1E; }
-.sep { width: 1px; height: 24px; background: #3A3A44; margin: 0 6px; flex-shrink: 0; }
-.seg { display: inline-flex; padding: 3px; border-radius: 10px; background: #24242C; margin-left: 4px; }
-.seg .tb { height: 30px; }
-.seg .tb[aria-checked="true"] { background: #3A3A44; }
-.go {
-  height: 38px;
-  padding: 0 16px;
-  border-radius: 10px;
-  border: none;
-  background: var(--accent);
-  color: #FFFFFF;
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.go:disabled { background: #3A3A44; color: #A9A9B3; cursor: default; }
 .pick { border: 1px dashed #6B5BFF; }
 
 .toast {

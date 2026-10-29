@@ -1,7 +1,8 @@
 /**
  * The side panel: everything about pins except placing them on the page. It owns the
  * connection to the helper (through the service worker, which keeps the token), the
- * session picker, preview-then-send, each pin's thread, copy, and the settings. It reads
+ * session sheet, preview-then-send, the inbox and each pin's chat, copy, and the
+ * settings. It reads
  * the page's pins and their statuses from extension storage, and talks to the pin mode
  * script in the active tab over `PageLink`.
  */
@@ -21,13 +22,13 @@ import { chromeStatusSource, type StatusSource } from "../status/store";
 import { PinStore, watchPins, type StoredPin } from "../store/pins";
 import { h } from "../ui/dom";
 import { GitHubActions, type GitHubChoice } from "./github-actions";
-import type { PanelActions, PanelFields, PanelModel } from "./model";
+import type { PanelActions, PanelFields, PanelModel, PanelScreen, PanelSheet } from "./model";
 import { PageLink, type PageState } from "./page-link";
-import type { PageToPanel, PanelTab } from "./protocol";
+import type { PageToPanel } from "./protocol";
 import { SendFlow } from "./send-flow";
-import { header, previewSheet, statusLine } from "./views/shell";
-import { pinsView } from "./views/pins";
-import { sessionsView } from "./views/sessions";
+import { backHeader, header, previewSheet, statusLine } from "./views/shell";
+import { LEVEL_LABELS, pinsView } from "./views/pins";
+import { sessionsSheet } from "./views/sessions";
 import { settingsView } from "./views/settings";
 import { threadView } from "./views/thread";
 
@@ -37,9 +38,12 @@ const STATUS_MS = 8000;
 const HELPER_COMMAND = "npx squashflow";
 
 export class PanelApp {
-  private tab: PanelTab = "pins";
+  private screen: PanelScreen = "inbox";
+  private sheet: PanelSheet = null;
+  private confirmed: string | null = null;
   private openPinId: string | null = null;
   private editing = false;
+  private detailsOpen = false;
   private pins: StoredPin[] = [];
   private statuses: PinStatuses = {};
   private settings: Settings = DEFAULT_SETTINGS;
@@ -62,10 +66,7 @@ export class PanelApp {
     this.send = new SendFlow({
       ask,
       pageUrl: () => this.pageUrl(),
-      onChange: () => {
-        this.render();
-        this.tellPage();
-      },
+      onChange: () => this.render(),
       report: (text, outcome) => this.setStatus(text, outcome === "error"),
     });
     this.github = new GitHubActions({
@@ -85,7 +86,6 @@ export class PanelApp {
     watchSettings((settings) => {
       this.settings = settings;
       this.render();
-      this.tellPage();
     });
     this.statuses = await this.statusSource.read();
     this.statusSource.watch((statuses) => {
@@ -117,7 +117,6 @@ export class PanelApp {
     }
     this.unwatchPins = watchPins(page.url, () => void this.reloadPins());
     await this.reloadPins();
-    this.tellPage();
     // The remembered repository depends on the page's site.
     if (this.send.state.connection.state === "paired") await this.send.refresh();
   }
@@ -134,60 +133,48 @@ export class PanelApp {
 
   private onPageMessage(message: PageToPanel): void {
     switch (message.type) {
-      case "go":
-        this.go();
-        return;
       case "send-pin":
         void this.reloadPins().then(() => this.sendPin(message.pinId));
         return;
       case "open-pin":
         void this.reloadPins().then(() => this.openPin(message.pinId));
         return;
-      case "open-tab":
-        this.openPinId = null;
-        this.tab = message.tab;
-        this.render();
-        return;
       case "hello":
         return;
     }
   }
 
-  /** Tell the toolbar on the page where pins go. */
-  private tellPage(): void {
-    const target = this.send.target;
-    this.link.post({
-      type: "target",
-      target: {
-        connection: this.send.state.connection.state,
-        session:
-          target === null
-            ? null
-            : {
-                name: sessionDisplayName(target),
-                status: target.status,
-                detail: [target.terminal, target.account?.label, target.repo, target.branch]
-                  .filter(Boolean)
-                  .join(" · "),
-              },
-        copyOnly: this.settings.copyOnly,
-      },
-    });
-  }
-
   // ---- actions ----
 
   private readonly actions: PanelActions = {
-    setTab: (tab) => {
-      this.tab = tab;
+    openSettings: () => {
+      this.screen = "settings";
+      this.sheet = null;
       this.openPinId = null;
       this.editing = false;
+      this.render();
+    },
+    closeSettings: () => {
+      this.screen = "inbox";
+      this.render();
+    },
+    openSessions: () => {
+      this.sheet = "sessions";
+      this.render();
+      void this.send.refresh();
+    },
+    closeSessions: () => {
+      this.sheet = null;
       this.render();
     },
     openPin: (id) => this.openPin(id),
     closePin: () => {
       this.openPinId = null;
       this.editing = false;
+      this.render();
+    },
+    toggleDetails: () => {
+      this.detailsOpen = !this.detailsOpen;
       this.render();
     },
     startPinning: () =>
@@ -209,7 +196,15 @@ export class PanelApp {
         await this.send.pair(code, port);
         if (this.send.state.connection.state === "paired") {
           await this.setSettings({ copyOnly: false });
-          if (this.send.target === null) this.tab = "sessions";
+          this.screen = "inbox";
+          // The green line confirms it; the toast would say it twice.
+          this.status = null;
+          if (this.send.target === null) {
+            this.confirmed = "Connected. Now pick who fixes this site.";
+            this.sheet = "sessions";
+          } else {
+            this.confirmed = "Connected.";
+          }
           this.render();
         }
       });
@@ -218,21 +213,27 @@ export class PanelApp {
     connectAgain: () =>
       void this.run(async () => {
         await this.setSettings({ copyOnly: false });
-        this.tab = "pins";
+        this.screen = "inbox";
         this.render();
       }),
     rePair: () => {
       this.send.openPairing();
-      this.tab = "pins";
+      this.screen = "inbox";
       this.render();
     },
     cancelPairing: () => this.send.closePairing(),
-    forget: () => void this.send.forget(),
+    forget: () => {
+      this.confirmed = null;
+      void this.send.forget();
+    },
     retry: () => void this.send.start(),
     refresh: () => void this.send.refresh(),
     selectSession: (pid) => this.send.select(pid),
     useSession: () => {
-      this.tab = "pins";
+      const target = this.send.target;
+      if (target === null) return;
+      this.sheet = null;
+      this.confirmed = `${sessionDisplayName(target)} will fix this site.`;
       this.render();
     },
     rememberSite: (remember) => void this.send.rememberSite(remember),
@@ -329,9 +330,11 @@ export class PanelApp {
 
   private openPin(id: string): void {
     if (!this.pins.some((pin) => pin.id === id)) return;
-    this.tab = "pins";
+    this.screen = "inbox";
+    this.sheet = null;
     this.openPinId = id;
     this.editing = false;
+    this.detailsOpen = false;
     this.fields.reply.value = "";
     this.render();
   }
@@ -340,6 +343,7 @@ export class PanelApp {
   private go(): void {
     const drafts = this.pins.filter((pin) => this.statuses[pin.id] === undefined);
     if (!this.canSend()) return;
+    this.confirmed = null;
     if (drafts.length === 0) {
       this.setStatus("Every pin on this page has been sent. Pin something new first.");
       return;
@@ -350,25 +354,26 @@ export class PanelApp {
   private sendPin(id: string): void {
     const pin = this.pins.find((candidate) => candidate.id === id);
     if (pin === undefined || !this.canSend()) return;
+    this.confirmed = null;
     void this.send.preview([pin]);
   }
 
   /** Whether pins can be sent; otherwise send the user where they can fix that. */
   private canSend(): boolean {
     if (this.settings.copyOnly) {
-      this.setStatus("Copy mode is on: copy the pins, or connect to your terminal in Settings.");
+      this.setStatus("You chose to copy pins by hand. Copy them, or connect in Settings.");
       return false;
     }
     if (this.send.state.connection.state !== "paired") {
-      this.tab = "pins";
+      this.screen = "inbox";
       this.openPinId = null;
-      this.setStatus("Connect to your terminal first, or copy the pins instead.", true);
+      this.setStatus("Connect first, or copy the pins instead.", true);
       return false;
     }
     if (this.send.target === null) {
-      this.tab = "sessions";
-      this.openPinId = null;
-      this.setStatus("Pick the session that should get the pins.", true);
+      this.screen = "inbox";
+      this.sheet = "sessions";
+      this.render();
       return false;
     }
     return true;
@@ -381,7 +386,7 @@ export class PanelApp {
       const { level } = this.settings;
       const result = await copyPins({ pins, level, pageUrl: url }, this.root);
       const what = pins.length === 1 ? "1 pin" : `${pins.length} pins`;
-      this.setStatus(`Copied ${what} (${level}). ${copyAdvice(result)}`);
+      this.setStatus(`Copied ${what} (${LEVEL_LABELS[level]}). ${copyAdvice(result)}`);
     });
   }
 
@@ -399,7 +404,6 @@ export class PanelApp {
     await this.run(async () => {
       this.settings = await this.settingsStore.change(patch);
       this.render();
-      this.tellPage();
     });
   }
 
@@ -425,9 +429,12 @@ export class PanelApp {
 
   private model(): PanelModel {
     return {
-      tab: this.tab,
+      screen: this.screen,
+      sheet: this.sheet,
+      confirmed: this.confirmed,
       openPinId: this.openPinId,
       editing: this.editing,
+      detailsOpen: this.detailsOpen,
       page: this.link.page,
       pins: this.pins,
       statuses: this.statuses,
@@ -449,20 +456,26 @@ export class PanelApp {
     const body =
       open !== undefined
         ? threadView(model, this.actions, open, index + 1)
-        : [
-            header(model, this.actions, true),
-            ...(this.tab === "pins"
-              ? pinsView(model, this.actions)
-              : this.tab === "sessions"
-                ? sessionsView(model, this.actions)
-                : settingsView(model, this.actions)),
-          ];
+        : this.screen === "settings"
+          ? [
+              backHeader("Settings", this.actions.closeSettings),
+              ...settingsView(model, this.actions),
+            ]
+          : [header(model, this.actions), ...pinsView(model, this.actions)];
+    const sheet =
+      open === undefined &&
+      this.screen === "inbox" &&
+      this.sheet === "sessions" &&
+      model.send.connection.state === "paired"
+        ? sessionsSheet(model, this.actions)
+        : null;
     const scrolled = this.root.querySelector(".scroll")?.scrollTop ?? 0;
     const [first, ...rest] = body;
     this.root.replaceChildren(
       ...(first === undefined ? [] : [first]),
       statusLine(model),
       ...rest,
+      ...nonNull(sheet),
       ...nonNull(previewSheet(model, this.actions)),
     );
     this.keepScroll(open, scrolled);
@@ -483,7 +496,7 @@ export class PanelApp {
   private keepScroll(open: StoredPin | undefined, scrolled: number): void {
     const scroll = this.root.querySelector(".scroll");
     if (scroll === null) return;
-    const view = open === undefined ? this.tab : `pin:${open.id}`;
+    const view = open === undefined ? this.screen : `pin:${open.id}`;
     const length = open === undefined ? 0 : scroll.querySelectorAll(".convo > li").length;
     const grew = view === this.shown.view ? length > this.shown.length : open !== undefined;
     scroll.scrollTop = grew ? scroll.scrollHeight : view === this.shown.view ? scrolled : 0;
@@ -528,7 +541,7 @@ function panelFields(): PanelFields {
     reply: h("textarea", {
       attrs: {
         id: "reply",
-        placeholder: "Not quite? Reply to Claude…",
+        placeholder: "Reply to Claude…",
         maxlength: "4000",
         rows: "1",
       },
@@ -536,10 +549,6 @@ function panelFields(): PanelFields {
     edit: h("textarea", {
       className: "edit-box",
       attrs: { id: "edit-comment", maxlength: "8000" },
-    }),
-    repoLink: h("input", {
-      className: "field mono",
-      attrs: { id: "repo-link", placeholder: "github.com/owner/repo", style: "flex: 1 1 auto" },
     }),
   };
 }

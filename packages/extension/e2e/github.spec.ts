@@ -1,9 +1,10 @@
 /**
  * The GitHub flow: a pin whose session replies that it lacks GitHub access moves to
- * Blocked: GitHub access, and its thread in the side panel offers four ways out. Copy
- * the patch and Ask the owner copy to the clipboard; Log in shows `gh auth login` and a
- * Retry, whose follow-up reaches the fake inbox only after the user confirms the
- * previewed message. The helper runs against
+ * Blocked: GitHub access, lands in the inbox's Needs you group, and its chat opens with
+ * the dark "Needs you" card: forking is the main button, the other ways are links. Copy
+ * the change and Ask the owner copy to the clipboard; another account shows
+ * `gh auth login` and a Retry, whose follow-up reaches the fake inbox only after the user
+ * confirms the previewed message. The helper runs against
  * a fake `claude`, fake inbox sockets and a fake transcript, as in the send test.
  */
 
@@ -46,18 +47,18 @@ async function pairAndSend(panel: Page, page: Page): Promise<{ content: string; 
   await panel.getByRole("radio", { name: /e2e-github/ }).check();
   await panel.getByRole("button", { name: "Use e2e-github" }).click();
   await pinElement(page, "#buy", "Make the Buy button violet");
-  await panel.getByRole("button", { name: /^Go · send 1 pin/ }).click();
+  await panel.getByRole("button", { name: "Send 1 pin to Claude" }).click();
   const dialog = panel.getByRole("dialog", { name: "Message preview" });
   const previewed = await dialog.locator("pre").innerText();
   expect(previewed).toContain("SQUASHFLOW-BLOCKED [sf-");
-  await dialog.getByRole("button", { name: "Send to claude@e2e-github" }).click();
+  await dialog.getByRole("button", { name: "Send 1 pin to Claude" }).click();
   const line = JSON.parse(await helper.received(DEMO.pid)) as { message: { content: string } };
   const id = /Squashflow pin \[(sf-[0-9a-f]{12})\]/.exec(previewed)?.[1];
   if (id === undefined) throw new Error("No pin id in the preview");
   return { content: line.message.content, id };
 }
 
-test("a pin blocked on GitHub access offers four ways out", async () => {
+test("a pin blocked on GitHub access needs you, with four ways out", async () => {
   const panel = await harness.openPanel();
   const page = await harness.context.newPage();
   await page.goto(`${harness.origin}/`);
@@ -90,29 +91,30 @@ test("a pin blocked on GitHub access offers four ways out", async () => {
     "data-status",
     "blocked",
   );
-  await expect(panel.getByRole("button", { name: "Open pin 1" })).toContainText(
-    "Blocked: GitHub access",
+  const needsYou = panel.getByRole("region", { name: "Needs you" });
+  await expect(needsYou.getByRole("button", { name: "Open pin 1" })).toContainText(
+    "Made the Buy button violet",
   );
-  await panel.getByRole("button", { name: "Open pin 1" }).click();
+  await needsYou.getByRole("button", { name: "Open pin 1" }).click();
   const options = panel.getByRole("group", { name: "GitHub access" });
   await expect(
-    options.getByRole("heading", { name: "Claude made the fix, but can't push it" }),
+    options.getByRole("heading", { name: "Claude fixed it but can't push to GitHub." }),
   ).toBeVisible();
   await expect(options.getByText("no push permission to acme/demo")).toBeVisible();
   for (const name of [
-    "Fork and open a PR",
-    "Log in with another account",
-    "Copy the patch",
-    "Ask the owner",
+    "Open a PR from my fork",
+    "use another account",
+    "copy the change",
+    "ask the owner",
   ]) {
     await expect(options.getByRole("button", { name })).toBeVisible();
   }
 
-  await options.getByRole("button", { name: "Copy the patch" }).click();
+  await options.getByRole("button", { name: "copy the change" }).click();
   await expect(panel.getByRole("status")).toHaveText("Copied the patch for pin 1.");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(PATCH);
 
-  await options.getByRole("button", { name: "Ask the owner" }).click();
+  await options.getByRole("button", { name: "ask the owner" }).click();
   await expect(panel.getByRole("status")).toHaveText(
     "Copied a message for the repository owner about pin 1.",
   );
@@ -121,10 +123,11 @@ test("a pin blocked on GitHub access offers four ways out", async () => {
   expect(owner).toContain("> Made the Buy button violet and committed it");
   expect(owner).not.toContain("SQUASHFLOW-BLOCKED");
 
-  // Log in: the instruction, then Retry previews a follow-up; nothing is sent before confirm.
-  await options.getByRole("button", { name: "Log in with another account" }).click();
+  // Another account: the instruction, then Retry previews a follow-up; nothing is sent
+  // before confirm.
+  await options.getByRole("button", { name: "use another account" }).click();
   await expect(
-    options.getByText("Run `gh auth login` in a terminal, then press Retry."),
+    options.getByText("Run gh auth login in your terminal to use another account, then retry."),
   ).toBeVisible();
   await options.getByRole("button", { name: "Retry" }).click();
   const dialog = panel.getByRole("dialog", { name: "Message preview" });
@@ -135,16 +138,16 @@ test("a pin blocked on GitHub access offers four ways out", async () => {
 
   // Cancelling sends nothing; Fork previews its own follow-up.
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await options.getByRole("button", { name: "Fork and open a PR" }).click();
+  await options.getByRole("button", { name: "open a PR from my fork" }).click();
   await expect(dialog.locator("pre")).toContainText("gh repo fork");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect(helper.inboxLines(DEMO.pid)).toHaveLength(1);
 
-  await options.getByRole("button", { name: "Log in with another account" }).click();
+  await options.getByRole("button", { name: "use another account" }).click();
   await options.getByRole("button", { name: "Retry" }).click();
-  await dialog.getByRole("button", { name: "Send to claude@e2e-github" }).click();
+  await dialog.getByRole("button", { name: "Send to Claude" }).click();
   await expect(panel.getByRole("status")).toHaveText(
-    'Sent "Retry after logging in" to claude@e2e-github.',
+    'Sent "Retry after logging in" to e2e-github.',
   );
   await expect.poll(() => helper.inboxLines(DEMO.pid).length).toBe(2);
   const delivered = JSON.parse(helper.inboxLines(DEMO.pid)[1] ?? "{}") as {

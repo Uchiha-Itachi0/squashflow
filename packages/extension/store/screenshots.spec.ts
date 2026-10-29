@@ -62,7 +62,7 @@ test("store screenshots", async () => {
   await page.goto(`${harness.origin}/store`);
   await harness.startPinMode(page);
 
-  // Pair and pick the session first, so the toolbar shows where pins go.
+  // Pair and pick the session first, so the panel's header shows who fixes the site.
   await pair(panel, helper.pairingCode, helper.port);
   await panel.getByRole("radio", { name: /northwind-web/ }).check();
   await panel.getByRole("button", { name: "Use northwind-web" }).click();
@@ -81,14 +81,14 @@ test("store screenshots", async () => {
   await shoot(page, panel, "1-pin-an-area.png");
   await page.getByRole("button", { name: "Save pin" }).click();
 
-  // 2. Go, and preview the exact message.
-  await page.getByRole("button", { name: "Go · send 1" }).click();
+  // 2. Send from the inbox, and preview the exact message.
+  await panel.getByRole("button", { name: "Send 1 pin to Claude" }).click();
   const dialog = panel.getByRole("dialog", { name: "Message preview" });
   await expect(dialog).toBeVisible();
   await shoot(page, panel, "2-preview-then-send.png");
 
   // 3. Send it; Claude replies with a pull request, and the pin's thread shows it all.
-  await dialog.getByRole("button", { name: "Send to claude@northwind-web" }).click();
+  await dialog.getByRole("button", { name: "Send 1 pin to Claude" }).click();
   const line = JSON.parse(await helper.received(SESSION.pid)) as { message: { content: string } };
   await helper.appendTranscript(SESSION.pid, [
     {

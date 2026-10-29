@@ -1,28 +1,32 @@
 /**
- * P3, pins on this page: where pins go and how (send each now, or batch then Go), Squish
- * saying what is going on, the page's pins as cards, and Copy all with Go in the footer.
- * P6, copy only: the same pins as one message to paste anywhere, at a chosen detail level.
- * With pin mode off on the tab, a way to turn it on.
+ * B3, the inbox: the page's pins as chats, grouped by who acts next (Needs you, Claude is
+ * on it, Ready to send, Fixed), with the one send button in the footer. B5, copy by hand:
+ * the same pins, nothing sent, copied at a chosen detail level. With pin mode off on the
+ * tab, a way to turn it on.
  */
 
-import { DETAIL_LEVELS, sessionDisplayName, type DetailLevel } from "@squashflow/shared";
-import { buildCopyText } from "../../copy/copy";
+import { DETAIL_LEVELS, type DetailLevel } from "@squashflow/shared";
 import { shownLabel } from "../../status/pin-status";
 import type { StoredPin } from "../../store/pins";
 import { h } from "../../ui/dom";
 import { icon, markup } from "../../ui/icons";
-import { squishFace, squishSvg, type SquishMood } from "../../ui/squish";
-import { pullRequestLabel, shortUrl, timeAgo } from "../format";
+import { squishSvg } from "../../ui/squish";
+import { pullRequestLabel, timeAgo } from "../format";
 import type { PanelActions, PanelModel } from "../model";
-import { pinState, type PinState } from "../thread";
+import { INBOX_GROUPS, inboxGroup, pinState, replyForDisplay, type PinState } from "../thread";
 import { connectView } from "./connect";
+import { confirmLine, sendLabel } from "./shell";
 
-const LEVEL_LABELS: Record<DetailLevel, string> = {
-  compact: "Compact",
-  standard: "Standard",
-  detailed: "Detailed",
-  forensic: "Forensic",
+/** How much a copy includes, in plain words. */
+export const LEVEL_LABELS: Record<DetailLevel, string> = {
+  compact: "Short",
+  standard: "Normal",
+  detailed: "Full",
+  forensic: "+ Screenshot",
 };
+
+/** How much of Claude's latest reply a pin row shows. */
+const QUOTE_CHARS = 80;
 
 export function pinsView(model: PanelModel, actions: PanelActions): HTMLElement[] {
   if (model.page.kind !== "on") return pinModeOff(model, actions);
@@ -30,138 +34,63 @@ export function pinsView(model: PanelModel, actions: PanelActions): HTMLElement[
   if (model.send.connection.state !== "paired" || model.send.pairingOpen) {
     return connectView(model, actions);
   }
-  const drafts = model.pins.filter((pin) => model.statuses[pin.id] === undefined);
-  const target = model.target;
-  const goLabel =
-    target === null
-      ? "Pick a session first"
-      : drafts.length === 0
-        ? `Go · nothing to send`
-        : `Go · send ${drafts.length === 1 ? "1 pin" : `${drafts.length} pins`} to ${sessionDisplayName(target)}`;
+  const drafts = model.pins.filter((pin) => model.statuses[pin.id] === undefined).length;
   return [
     h("div", { className: "scroll" }, [
-      targetBar(model, actions),
-      squishSays(model),
-      pageHead(model.page.url),
-      pinList(model, actions),
+      h("div", { className: "stack" }, [confirmLine(model.confirmed), inbox(model, actions)]),
     ]),
-    h("footer", { className: "foot" }, [
-      h("div", { className: "row" }, [
-        h(
-          "button",
-          {
-            className: "btn",
-            attrs: { type: "button", ...(model.pins.length === 0 ? { disabled: "" } : {}) },
+    model.pins.length > 0 &&
+      h("footer", { className: "foot" }, [
+        drafts > 0 &&
+          h("button", {
+            className: "btn primary",
+            text: sendLabel(drafts),
+            attrs: { type: "button", ...(model.send.busy ? { disabled: "" } : {}) },
+            on: { click: actions.go },
+          }),
+        h("span", { className: "caption center" }, [
+          drafts > 0 && "You'll see the message before it goes. · ",
+          h("button", {
+            className: "link-btn inline",
+            text: "Copy all",
+            attrs: { type: "button" },
             on: { click: actions.copyAll },
-          },
-          [icon("copy"), "Copy all"],
-        ),
-        h("button", {
-          className: "btn primary grow",
-          text: goLabel,
-          attrs: {
-            type: "button",
-            ...(drafts.length === 0 || target === null || model.send.busy ? { disabled: "" } : {}),
-          },
-          on: { click: actions.go },
-        }),
+          }),
+        ]),
       ]),
-      h("span", { className: "caption", text: "You'll see exactly what is sent before it goes." }),
-    ]),
-  ];
+  ].filter((part): part is HTMLElement => part !== false);
 }
 
-function targetBar(model: PanelModel, actions: PanelActions): HTMLElement {
-  const target = model.target;
-  const mode = (value: "now" | "batch", label: string): HTMLButtonElement =>
-    h("button", {
-      text: label,
-      attrs: {
-        type: "button",
-        role: "radio",
-        "aria-checked": String(model.settings.sendMode === value),
-      },
-      on: { click: () => actions.setSendMode(value) },
-    });
-  return h("section", { className: "target", attrs: { "aria-label": "Where pins go" } }, [
-    h("div", { className: "line" }, [
-      h("span", { className: `dot ${target?.status ?? ""}` }),
-      target === null
-        ? h("span", { text: "No session picked yet" })
-        : h("span", {}, ["Sending to ", h("b", { text: sessionDisplayName(target) })]),
-      target !== null && h("span", { className: "soft", text: `· ${target.status}` }),
-      h("span", { className: "spacer" }),
-      h("button", {
-        text: target === null ? "Pick one" : "Change",
-        attrs: { type: "button" },
-        on: { click: () => actions.setTab("sessions") },
-      }),
-    ]),
-    h("div", { className: "modes", attrs: { role: "radiogroup", "aria-label": "Send mode" } }, [
-      mode("now", "Send each pin now"),
-      mode("batch", "Batch, then Go"),
-    ]),
-  ]);
-}
-
-/** Squish's one line about the page: what Claude is on, and what waits for the user. */
-function squishSays(model: PanelModel): HTMLElement {
-  const states = model.pins.map((pin) => pinState(model.statuses[pin.id]));
-  const numbered = (wanted: (state: PinState) => boolean): number[] =>
-    states.flatMap((state, index) => (wanted(state) ? [index + 1] : []));
-  const needs = numbered((state) => state === "blocked" || state === "approve-in-terminal");
-  const working = numbered((state) => state === "seen" || state === "sent");
-  const drafts = numbered((state) => state === "draft");
-  const parts: string[] = [];
-  if (model.pins.length === 0) parts.push("Click anything on the page to pin it.");
-  if (needs.length > 0)
-    parts.push(`${pinsText(needs)} ${needs.length === 1 ? "needs" : "need"} you.`);
-  if (working.length > 0) parts.push(`Claude has ${pinsText(working).toLowerCase()}.`);
-  if (drafts.length > 0) {
-    parts.push(
-      model.settings.sendMode === "batch"
-        ? `${pinsText(drafts)} ${drafts.length === 1 ? "is" : "are"} waiting for your Go!`
-        : `${pinsText(drafts)} ${drafts.length === 1 ? "is" : "are"} not sent yet.`,
-    );
-  }
-  if (parts.length === 0) parts.push("All squashed. Nice.");
-  const mood: SquishMood =
-    needs.length > 0
-      ? "blocked"
-      : working.length > 0
-        ? "working"
-        : drafts.length === 0 && model.pins.length > 0
-          ? "squashed"
-          : "waiting";
-  return h("div", { className: "say" }, [
-    h("span", { className: "face" }, [markup(squishFace(mood))]),
-    h("div", { className: "bubble", text: parts.join(" ") }),
-  ]);
-}
-
-function pinsText(numbers: readonly number[]): string {
-  return numbers.length === 1 ? `Pin ${numbers[0]}` : `Pins ${numbers.join(", ")}`;
-}
-
-function pageHead(url: string): HTMLElement {
-  return h("div", { className: "page-head" }, [
-    h("h1", { className: "title md", text: "This page" }),
-    h("span", { className: "mono", text: shortUrl(url), title: url }),
-  ]);
-}
-
-function pinList(model: PanelModel, actions: PanelActions): HTMLElement {
+function inbox(model: PanelModel, actions: PanelActions): HTMLElement {
   if (model.pins.length === 0) {
     return h("p", {
       className: "caption",
-      attrs: { style: "padding: 0 16px" },
-      text: "No pins on this page yet. Use the toolbar at the bottom of the page.",
+      attrs: { style: "margin: 0" },
+      text: "No pins yet. Click anything on the page to pin it. Your pins land here as chats.",
     });
   }
+  const rows = model.pins.map((pin, index) => ({
+    pin,
+    number: index + 1,
+    group: inboxGroup(pinState(model.statuses[pin.id])),
+  }));
   return h(
-    "ol",
-    { className: "pins", attrs: { "aria-label": "Pins on this page" } },
-    model.pins.map((pin, index) => h("li", {}, [pinCard(pin, index + 1, model, actions)])),
+    "div",
+    { className: "inbox" },
+    INBOX_GROUPS.flatMap(([group, title]) => {
+      const inGroup = rows.filter((row) => row.group === group);
+      if (inGroup.length === 0) return [];
+      return [
+        h("section", { className: "group", attrs: { "aria-label": title } }, [
+          h("h2", { className: "eyebrow", text: `${title} · ${inGroup.length}` }),
+          h(
+            "ol",
+            { className: "pins" },
+            inGroup.map(({ pin, number }) => h("li", {}, [pinRow(pin, number, model, actions)])),
+          ),
+        ]),
+      ];
+    }),
   );
 }
 
@@ -186,7 +115,7 @@ export function stateChip(state: PinState, label: string): HTMLElement {
   return h("span", { className: `chip ${tone}`, text: label });
 }
 
-function pinCard(
+function pinRow(
   pin: StoredPin,
   number: number,
   model: PanelModel,
@@ -194,13 +123,6 @@ function pinCard(
 ): HTMLElement {
   const tracking = model.statuses[pin.id];
   const state = pinState(tracking);
-  const latest = tracking?.thread.at(-1);
-  const label =
-    tracking === undefined
-      ? model.settings.sendMode === "batch"
-        ? "Draft · waits for Go"
-        : "Draft"
-      : shownLabel(tracking);
   return h(
     "button",
     {
@@ -212,22 +134,29 @@ function pinCard(
       pinDot(state, number),
       h("span", { className: "main" }, [
         h("span", { className: "comment", text: pin.comment }),
-        latest !== undefined && h("span", { className: "quote", text: latest.text }),
-        h("span", { className: "meta" }, [
-          stateChip(state, label),
-          tracking?.pullRequestUrl != null &&
-            h("span", {
-              text: pullRequestLabel(tracking.pullRequestUrl),
-              attrs: { style: "font-weight: 600; color: var(--accent-text)" },
-            }),
-          tracking !== undefined && h("span", { text: timeAgo(tracking.updatedAt, model.now) }),
-          tracking === undefined &&
-            pin.context.selector !== undefined &&
-            h("span", { className: "mono", text: pin.context.selector }),
-        ]),
+        h("span", { className: "meta", text: pinMeta(pin, state, model) }),
       ]),
     ],
   );
+}
+
+/** One short line under a pin: what Claude said last, or where it stands, and when. */
+function pinMeta(pin: StoredPin, state: PinState, model: PanelModel): string {
+  const tracking = model.statuses[pin.id];
+  if (tracking === undefined) return timeAgo(pin.createdAt, model.now);
+  const when = timeAgo(tracking.updatedAt, model.now);
+  if (state === "fixed" && tracking.pullRequestUrl !== null) {
+    return `${pullRequestLabel(tracking.pullRequestUrl)} · Merge it, then mark done`;
+  }
+  const latest = tracking.thread.at(-1);
+  const said = latest === undefined ? "" : oneLine(replyForDisplay(latest.text));
+  const what = said === "" ? shownLabel(tracking) : `Claude: “${said}”`;
+  return when === "" ? what : `${what} · ${when}`;
+}
+
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= QUOTE_CHARS ? flat : `${flat.slice(0, QUOTE_CHARS - 1)}…`;
 }
 
 /** Pin mode is not running on the active tab, or there is no web page. */
@@ -241,7 +170,7 @@ function pinModeOff(model: PanelModel, actions: PanelActions): HTMLElement[] {
         h("p", {
           className: "lead",
           text: hasTab
-            ? "Pin mode is off on this tab. Turn it on, then click anything on the page to pin a comment to it."
+            ? "Squashflow is off on this tab. Turn it on, then click anything on the page to pin a comment to it."
             : "Open a web page, then press the Squashflow button in the toolbar to pin on it.",
         }),
         hasTab &&
@@ -260,75 +189,69 @@ function pinModeOff(model: PanelModel, actions: PanelActions): HTMLElement[] {
   ];
 }
 
-/** P6: nothing is sent; the pins as one message to copy, at a chosen detail level. */
+/** B5: nothing is sent; the pins to copy into any chat with Claude. */
 function copyOnlyView(model: PanelModel, actions: PanelActions): HTMLElement[] {
-  const pageUrl = model.page.kind === "on" ? model.page.url : "";
-  const site = pageUrl === "" ? "this site" : new URL(pageUrl).host;
-  const level = (value: DetailLevel): HTMLButtonElement =>
-    h("button", {
-      text: LEVEL_LABELS[value],
-      attrs: {
-        type: "button",
-        role: "radio",
-        "aria-checked": String(model.settings.level === value),
-      },
-      on: { click: () => actions.setLevel(value) },
-    });
   const count = model.pins.length;
-  const text =
-    count === 0
-      ? "No pins on this page yet."
-      : buildCopyText({ pins: model.pins, level: model.settings.level, pageUrl });
   return [
     h("div", { className: "scroll" }, [
-      h("div", { className: "stack", attrs: { style: "padding: 16px; gap: 14px" } }, [
-        h("section", { className: "notice warn" }, [
-          h("b", { text: `Copy mode on ${site}`, attrs: { style: "font-size: 14.5px" } }),
-          h("span", {
-            text: "So nothing is sent to Claude. Your pins are saved on this laptop and you can copy them anywhere.",
-          }),
+      h("div", { className: "stack" }, [
+        h("div", { className: "note" }, [
+          "Pins are saved here. Copy them into any chat with Claude. ",
           h("button", {
-            className: "link-btn",
-            text: "Connect to your terminal instead →",
-            attrs: { type: "button", style: "font-size: 13px" },
+            className: "link-btn inline",
+            text: "Connect instead",
+            attrs: { type: "button" },
             on: { click: actions.connectAgain },
           }),
         ]),
-        h("div", { attrs: { style: "display: flex; flex-direction: column; gap: 8px" } }, [
-          h("span", {
-            className: "eyebrow",
-            text: "How much detail",
-            attrs: { id: "level-label" },
-          }),
-          h(
-            "div",
-            {
-              className: "seg-light",
-              attrs: { role: "radiogroup", "aria-labelledby": "level-label" },
-            },
-            DETAIL_LEVELS.map(level),
-          ),
-        ]),
-        h("div", { attrs: { style: "display: flex; flex-direction: column; gap: 8px" } }, [
-          h("span", {
-            className: "eyebrow",
-            text: `Preview · ${count === 1 ? "1 pin" : `${count} pins`}`,
-          }),
-          h("pre", {
-            className: "copy-preview",
-            text,
-            attrs: { "aria-label": "What Copy puts on the clipboard" },
-          }),
-        ]),
+        count === 0
+          ? h("p", {
+              className: "caption",
+              attrs: { style: "margin: 0" },
+              text: "No pins yet. Click anything on the page to pin it.",
+            })
+          : h("section", { className: "group", attrs: { "aria-label": "On this page" } }, [
+              h("h2", { className: "eyebrow", text: `On this page · ${count}` }),
+              h(
+                "ol",
+                { className: "pins" },
+                model.pins.map((pin, index) =>
+                  h("li", {}, [pinRow(pin, index + 1, model, actions)]),
+                ),
+              ),
+            ]),
+        levelPicker(model, actions, "copy-level"),
       ]),
     ]),
     h("footer", { className: "foot" }, [
       h("button", {
-        className: "btn dark",
+        className: "btn primary",
         text: count === 1 ? "Copy 1 pin" : `Copy ${count} pins`,
         attrs: { type: "button", ...(count === 0 ? { disabled: "" } : {}) },
         on: { click: actions.copyAll },
       }),
     ]),
   ];
+}
+
+/** How much a copy includes: Short, Normal, Full, + Screenshot. */
+export function levelPicker(model: PanelModel, actions: PanelActions, id: string): HTMLElement {
+  return h("div", { className: "stack tight" }, [
+    h("span", { className: "eyebrow", text: "Include", attrs: { id } }),
+    h(
+      "div",
+      { className: "seg-light", attrs: { role: "radiogroup", "aria-labelledby": id } },
+      DETAIL_LEVELS.map((level) =>
+        h("button", {
+          text: LEVEL_LABELS[level],
+          attrs: {
+            type: "button",
+            role: "radio",
+            "aria-checked": String(model.settings.level === level),
+          },
+          on: { click: () => actions.setLevel(level) },
+        }),
+      ),
+    ),
+  ]);
 }

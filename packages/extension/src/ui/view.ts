@@ -8,8 +8,6 @@
 
 import type { Rect } from "@squashflow/shared";
 import { HOST_TAG } from "../constants";
-import type { ToolbarTarget } from "../panel/protocol";
-import type { SendMode } from "../settings";
 import type { ShownStatus } from "../status/pin-status";
 import { h, placeBox } from "./dom";
 import { icon } from "./icons";
@@ -25,21 +23,13 @@ export interface MarkerView {
   status: { status: ShownStatus; label: string } | null;
 }
 
+/** Pin tools only: sending, copying and the session live in the side panel. */
 export interface ToolbarProps {
   mode: PinModeKind;
-  /** What the side panel says about where pins go; null while no panel is connected. */
-  target: ToolbarTarget | null;
-  sendMode: SendMode;
-  /** Pins on the page not sent yet. */
-  drafts: number;
   /** Elements picked in Multi mode, waiting to become one pin. */
   selected: number;
   onMode: (mode: PinModeKind) => void;
-  onSendMode: (mode: SendMode) => void;
-  onSession: () => void;
   onPinSelection: () => void;
-  onCopy: () => void;
-  onGo: () => void;
   onClose: () => void;
 }
 
@@ -48,7 +38,7 @@ export interface ComposerProps {
   number: number;
   /** What was pinned: a selector, or a short description. */
   where: string;
-  /** What happens on Save, e.g. "Batch on · sends with Go". */
+  /** What happens on Save, e.g. "Send it from the side panel". */
   hint: string;
   /** Offer to keep the region screenshot taken for the pin (ticked by default). */
   screenshot: boolean;
@@ -271,14 +261,6 @@ function toolbar(props: ToolbarProps): HTMLElement {
       },
       [icon(mode), label],
     );
-  const sendModeButton = (mode: SendMode, label: string): HTMLButtonElement =>
-    h("button", {
-      className: "tb",
-      text: label,
-      attrs: { type: "button", role: "radio", "aria-checked": String(props.sendMode === mode) },
-      on: { click: () => props.onSendMode(mode) },
-    });
-  const copyOnly = props.target?.copyOnly === true;
   return h(
     "div",
     { className: "toolbar", attrs: { role: "toolbar", "aria-label": "Squashflow toolbar" } },
@@ -291,30 +273,7 @@ function toolbar(props: ToolbarProps): HTMLElement {
           attrs: { type: "button", ...(props.selected === 0 ? { disabled: "" } : {}) },
           on: { click: props.onPinSelection },
         }),
-      h("span", { className: "sep", attrs: { "aria-hidden": "true" } }),
-      sessionChip(props),
-      !copyOnly &&
-        h("span", { className: "seg", attrs: { role: "radiogroup", "aria-label": "Send mode" } }, [
-          sendModeButton("now", "Send now"),
-          sendModeButton("batch", "Batch"),
-        ]),
       h("span", { className: "spacer" }),
-      h(
-        "button",
-        {
-          className: "tb",
-          attrs: { type: "button", "aria-label": "Copy all pins" },
-          on: { click: props.onCopy },
-        },
-        [icon("copy"), "Copy"],
-      ),
-      !copyOnly &&
-        h("button", {
-          className: "go",
-          text: props.drafts === 0 ? "Go" : `Go · send ${props.drafts}`,
-          attrs: { type: "button", ...(props.drafts === 0 ? { disabled: "" } : {}) },
-          on: { click: props.onGo },
-        }),
       h(
         "button",
         {
@@ -327,41 +286,6 @@ function toolbar(props: ToolbarProps): HTMLElement {
       ),
     ],
   );
-}
-
-/** Which Claude gets the pins; opens the side panel's Sessions tab. */
-function sessionChip(props: ToolbarProps): HTMLButtonElement {
-  const { target } = props;
-  const [label, state] = chipText(target);
-  return h(
-    "button",
-    {
-      className: "tb session",
-      title: ["Choose which Claude Code session gets the pins", target?.session?.detail ?? ""]
-        .filter(Boolean)
-        .join("\n"),
-      attrs: { type: "button", "aria-label": `Session: ${label}` },
-      on: { click: props.onSession },
-    },
-    [
-      h("span", { className: `dot ${state}` }),
-      h("span", { className: "label", text: label }),
-      icon("chevron"),
-    ],
-  );
-}
-
-function chipText(target: ToolbarTarget | null): [string, string] {
-  if (target === null) return ["Open the panel", ""];
-  if (target.copyOnly) return ["Copy mode", ""];
-  if (target.connection === "checking") return ["Checking…", ""];
-  if (target.connection !== "paired") return ["Not connected", ""];
-  if (target.session === null) return ["Pick a session", ""];
-  const status = target.session.status;
-  return [
-    `${target.session.name} · ${status}`,
-    status === "idle" || status === "busy" ? status : "",
-  ];
 }
 
 /** Resolve after the browser has painted the current state of the page twice. */
