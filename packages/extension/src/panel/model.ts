@@ -9,7 +9,6 @@ import type { PinStatuses } from "../status/pin-status";
 import type { StoredPin } from "../store/pins";
 import type { GitHubBlockView, GitHubChoice } from "./github-actions";
 import type { PageState } from "./page-link";
-import type { PanelTab } from "./protocol";
 import type { SendState } from "./send-flow";
 
 /** Inputs kept across renders, so a re-render never clears what the user is typing. */
@@ -18,15 +17,23 @@ export interface PanelFields {
   port: HTMLInputElement;
   reply: HTMLTextAreaElement;
   edit: HTMLTextAreaElement;
-  repoLink: HTMLInputElement;
 }
 
+/** The inbox is home; Settings replaces it, and sheets slide over it. */
+export type PanelScreen = "inbox" | "settings";
+export type PanelSheet = "sessions" | null;
+
 export interface PanelModel {
-  tab: PanelTab;
+  screen: PanelScreen;
+  sheet: PanelSheet;
+  /** The last setup step that worked, said in a short green line until the next one. */
+  confirmed: string | null;
   /** The pin whose thread is open. */
   openPinId: string | null;
   /** Whether the open draft's comment is being edited. */
   editing: boolean;
+  /** Whether the open pin's technical details are shown. */
+  detailsOpen: boolean;
   page: PageState;
   pins: readonly StoredPin[];
   statuses: PinStatuses;
@@ -41,9 +48,13 @@ export interface PanelModel {
 }
 
 export interface PanelActions {
-  setTab: (tab: PanelTab) => void;
+  openSettings: () => void;
+  closeSettings: () => void;
+  openSessions: () => void;
+  closeSessions: () => void;
   openPin: (id: string) => void;
   closePin: () => void;
+  toggleDetails: () => void;
   startPinning: () => void;
   stopPinning: () => void;
   pair: () => void;
@@ -53,6 +64,7 @@ export interface PanelActions {
   /** Pair again while paired, and back out of that. */
   rePair: () => void;
   cancelPairing: () => void;
+  /** Disconnect: forget the pairing. */
   forget: () => void;
   retry: () => void;
   refresh: () => void;

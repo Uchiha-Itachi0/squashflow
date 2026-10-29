@@ -1,20 +1,18 @@
 /**
  * One pin as a conversation, oldest first: the user's comment, then what happened as
  * short system lines (Sent to <session>, Seen by Claude, Approve in terminal, Fixed with
- * its pull request, Blocked, Resolved), Claude's replies, and the user's follow-ups.
- * Pure: the thread view renders what this returns.
+ * its pull request, Blocked, Resolved), Claude's replies, and the user's follow-ups; and
+ * which inbox group a pin sits in. Pure: the views render what this returns.
  */
 
 import { BLOCKED_MARKER, FIXED_MARKER, type ThreadMessage } from "@squashflow/shared";
 import {
-  moodForStatus,
   shownStatus,
   type PinEvent,
   type PinTracking,
   type ShownStatus,
 } from "../status/pin-status";
 import type { StoredPin } from "../store/pins";
-import type { SquishMood } from "../ui/squish";
 
 export type EventTone = "neutral" | "accent" | "ok" | "warn" | "danger";
 
@@ -45,8 +43,30 @@ export function pinState(tracking: PinTracking | undefined): PinState {
   return tracking === undefined ? "draft" : shownStatus(tracking);
 }
 
-export function moodForPin(tracking: PinTracking | undefined): SquishMood {
-  return tracking === undefined ? "waiting" : moodForStatus(shownStatus(tracking));
+/** The inbox groups pins by who acts next, in this order. */
+export type InboxGroup = "needs-you" | "working" | "ready" | "fixed";
+
+export const INBOX_GROUPS: readonly [InboxGroup, string][] = [
+  ["needs-you", "Needs you"],
+  ["working", "Claude is on it"],
+  ["ready", "Ready to send"],
+  ["fixed", "Fixed"],
+];
+
+export function inboxGroup(state: PinState): InboxGroup {
+  switch (state) {
+    case "blocked":
+    case "approve-in-terminal":
+      return "needs-you";
+    case "sent":
+    case "seen":
+      return "working";
+    case "draft":
+      return "ready";
+    case "fixed":
+    case "resolved":
+      return "fixed";
+  }
 }
 
 export function buildThread(pin: StoredPin, tracking: PinTracking | undefined): ThreadItem[] {
@@ -76,27 +96,6 @@ export function buildThread(pin: StoredPin, tracking: PinTracking | undefined): 
       return a.index - b.index;
     })
     .map(({ item }) => item);
-}
-
-/** What Squish says about one pin, in the thread and on the list. */
-export function pinLine(state: PinState, sessionName: string | null): string {
-  const who = sessionName === null ? "Claude" : `claude@${sessionName}`;
-  switch (state) {
-    case "draft":
-      return "This pin is a draft. Press Go to send it, or copy it.";
-    case "sent":
-      return `Sent. Waiting for ${who} to pick it up.`;
-    case "approve-in-terminal":
-      return `Approve the message in ${who}'s terminal so Claude can read it.`;
-    case "seen":
-      return `${who} is on it.`;
-    case "fixed":
-      return "Fixed! Check the pull request, then resolve the pin.";
-    case "blocked":
-      return "This pin needs you. See below for the ways out.";
-    case "resolved":
-      return "Resolved. Reopen it if it is not right after all.";
-  }
 }
 
 /** Pins saved before history was kept show their current status as one line. */

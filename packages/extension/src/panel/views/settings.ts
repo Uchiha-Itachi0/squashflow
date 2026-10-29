@@ -1,22 +1,18 @@
 /**
- * Settings: the helper connection (re-pair, forget), how pins are sent, how much detail
- * Copy includes, copy mode, and pin mode on this tab.
+ * Settings: the connection to the terminal (connect again, disconnect, the port), how
+ * pins are sent, copying by hand and how much a copy includes, and pin mode on this tab.
+ * The technical words the main view avoids live here.
  */
 
-import { DETAIL_LEVELS, type DetailLevel } from "@squashflow/shared";
 import { h } from "../../ui/dom";
 import type { PanelActions, PanelModel } from "../model";
-
-const LEVELS: Record<DetailLevel, string> = {
-  compact: "Compact",
-  standard: "Standard",
-  detailed: "Detailed",
-  forensic: "Forensic",
-};
+import { levelPicker } from "./pins";
 
 export function settingsView(model: PanelModel, actions: PanelActions): HTMLElement[] {
   const { connection, busy } = model.send;
   const disabled = busy ? { disabled: "" } : {};
+  const { port } = model.fields;
+  if (port.value === "") port.value = String(connection.port);
   const radio = <T extends string>(
     current: T,
     value: T,
@@ -28,20 +24,24 @@ export function settingsView(model: PanelModel, actions: PanelActions): HTMLElem
       attrs: { type: "button", role: "radio", "aria-checked": String(current === value) },
       on: { click: () => onPick(value) },
     });
-  const helperLine =
+  const connectionLine =
     connection.state === "paired"
-      ? `Connected to the helper on port ${connection.port} (version ${connection.version}).`
+      ? `Connected to Squashflow in your terminal (version ${connection.version}).`
       : connection.state === "unreachable"
-        ? connection.message
+        ? "Can't reach Squashflow on this laptop. Run npx squashflow in a terminal."
         : connection.state === "checking"
-          ? "Checking the helper…"
-          : "Not connected to the helper.";
+          ? "Checking…"
+          : "Not connected.";
   return [
     h("div", { className: "scroll" }, [
       h("div", { className: "stack", attrs: { style: "gap: 14px" } }, [
         h("section", { className: "card" }, [
-          h("span", { className: "eyebrow", text: "Helper" }),
-          h("p", { className: "lead", attrs: { style: "font-size: 13.5px" }, text: helperLine }),
+          h("span", { className: "eyebrow", text: "Connection" }),
+          h("p", {
+            className: "lead",
+            attrs: { style: "font-size: 13.5px" },
+            text: connectionLine,
+          }),
           h("div", { attrs: { style: "display: flex; gap: 8px; flex-wrap: wrap" } }, [
             connection.state === "unreachable" &&
               h("button", {
@@ -52,7 +52,7 @@ export function settingsView(model: PanelModel, actions: PanelActions): HTMLElem
               }),
             h("button", {
               className: "btn small",
-              text: connection.state === "paired" ? "Re-pair" : "Connect",
+              text: connection.state === "paired" ? "Connect again" : "Connect",
               attrs: { type: "button", ...disabled },
               on: {
                 click: connection.state === "paired" ? actions.rePair : actions.connectAgain,
@@ -61,11 +61,20 @@ export function settingsView(model: PanelModel, actions: PanelActions): HTMLElem
             connection.state !== "unpaired" &&
               h("button", {
                 className: "btn small",
-                text: "Forget pairing",
+                text: "Disconnect",
                 attrs: { type: "button", ...disabled },
                 on: { click: actions.forget },
               }),
           ]),
+          h("div", { className: "set-row" }, [
+            h("label", { className: "muted", text: "Port", attrs: { for: "pair-port" } }),
+            port,
+          ]),
+          h("p", {
+            className: "caption",
+            attrs: { style: "margin: 0" },
+            text: "Change the port only if you started Squashflow with a different one. It is used the next time you connect.",
+          }),
         ]),
         h("section", { className: "card" }, [
           h("span", { className: "eyebrow", text: "Sending", attrs: { id: "send-mode-label" } }),
@@ -76,35 +85,26 @@ export function settingsView(model: PanelModel, actions: PanelActions): HTMLElem
               attrs: { role: "radiogroup", "aria-labelledby": "send-mode-label" },
             },
             [
-              radio(model.settings.sendMode, "now", "Send each pin now", actions.setSendMode),
-              radio(model.settings.sendMode, "batch", "Batch, then Go", actions.setSendMode),
+              radio(model.settings.sendMode, "batch", "Collect, then send", actions.setSendMode),
+              radio(model.settings.sendMode, "now", "Send each pin", actions.setSendMode),
             ],
-          ),
-          h("label", { className: "set-row" }, [
-            copyOnlyBox(model, actions),
-            "Copy mode: never send, only copy",
-          ]),
-        ]),
-        h("section", { className: "card" }, [
-          h("span", {
-            className: "eyebrow",
-            text: "Copy detail",
-            attrs: { id: "level-label-settings" },
-          }),
-          h(
-            "div",
-            {
-              className: "seg-light",
-              attrs: { role: "radiogroup", "aria-labelledby": "level-label-settings" },
-            },
-            DETAIL_LEVELS.map((level) =>
-              radio(model.settings.level, level, LEVELS[level], actions.setLevel),
-            ),
           ),
           h("p", {
             className: "caption",
             attrs: { style: "margin: 0" },
-            text: "Forensic adds the pin's screenshot. What you type into form fields is never captured.",
+            text: "Send each pin opens the message as soon as you save a pin. Either way, you see it before it goes.",
+          }),
+          h("label", { className: "set-row" }, [
+            copyOnlyBox(model, actions),
+            "Copy by hand: never send, only copy",
+          ]),
+        ]),
+        h("section", { className: "card" }, [
+          levelPicker(model, actions, "level-label-settings"),
+          h("p", {
+            className: "caption",
+            attrs: { style: "margin: 0" },
+            text: "+ Screenshot adds the pin's screenshot. What you type into form fields is never captured.",
           }),
         ]),
         model.page.kind === "on" &&
@@ -112,7 +112,7 @@ export function settingsView(model: PanelModel, actions: PanelActions): HTMLElem
             h("span", { className: "eyebrow", text: "This tab" }),
             h("button", {
               className: "btn small",
-              text: "Stop pin mode on this page",
+              text: "Stop pinning on this page",
               attrs: { type: "button" },
               on: { click: actions.stopPinning },
             }),

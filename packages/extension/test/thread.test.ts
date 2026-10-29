@@ -1,6 +1,6 @@
 import type { PinRecord } from "@squashflow/shared";
 import { describe, expect, it } from "vitest";
-import { buildThread, moodForPin, pinLine, pinState, replyForDisplay } from "../src/panel/thread";
+import { buildThread, inboxGroup, pinState, replyForDisplay } from "../src/panel/thread";
 import { applyRecord, setResolved, trackSent, type PinTracking } from "../src/status/pin-status";
 import type { StoredPin } from "../src/store/pins";
 
@@ -75,7 +75,6 @@ describe("a pin's thread", () => {
   it("is only the comment while the pin is a draft", () => {
     expect(buildThread(pin, undefined)).toEqual([{ kind: "comment", text: pin.comment, at: T0 }]);
     expect(pinState(undefined)).toBe("draft");
-    expect(moodForPin(undefined)).toBe("waiting");
   });
 
   it("reads Sent, Seen, Claude's reply, then Fixed with the pull request", () => {
@@ -92,7 +91,7 @@ describe("a pin's thread", () => {
       tone: "ok",
       pullRequestUrl: "https://github.com/acme/web/pull/5",
     });
-    expect(moodForPin(fixedTracking())).toBe("squashed");
+    expect(pinState(fixedTracking())).toBe("fixed");
   });
 
   it("puts the user's follow-up and the next message after the earlier reply", () => {
@@ -137,9 +136,13 @@ describe("a pin's thread", () => {
     );
   });
 
-  it("has Squish say what the pin waits for", () => {
-    expect(pinLine("draft", null)).toMatch(/Press Go/);
-    expect(pinLine("approve-in-terminal", "web")).toContain("claude@web's terminal");
-    expect(pinLine("seen", "web")).toBe("claude@web is on it.");
+  it("files each pin in the inbox by who acts next", () => {
+    expect(inboxGroup("blocked")).toBe("needs-you");
+    expect(inboxGroup("approve-in-terminal")).toBe("needs-you");
+    expect(inboxGroup("sent")).toBe("working");
+    expect(inboxGroup("seen")).toBe("working");
+    expect(inboxGroup("draft")).toBe("ready");
+    expect(inboxGroup("fixed")).toBe("fixed");
+    expect(inboxGroup("resolved")).toBe("fixed");
   });
 });

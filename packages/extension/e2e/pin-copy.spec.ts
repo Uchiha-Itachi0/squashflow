@@ -1,7 +1,7 @@
 /**
  * The built extension in Chromium on a local fixture page, with nothing connected: place
- * a pin, write a comment, and copy it from the page's toolbar and from the side panel's
- * copy mode, checking the clipboard text.
+ * a pin, write a comment, and copy it by hand from the side panel, checking the clipboard
+ * text.
  */
 
 import { expect, test } from "@playwright/test";
@@ -38,16 +38,16 @@ test("pin an element, comment on it and copy it", async () => {
   expect(await page.evaluate(() => (window as unknown as { buyClicks: number }).buyClicks)).toBe(0);
   await expect(page.getByRole("button", { name: "Pin 1: draft" })).toBeVisible();
 
-  // Skip connecting: copy mode shows exactly what Copy puts on the clipboard.
-  await panel.getByRole("button", { name: "Skip, I'll just copy and paste →" }).click();
-  await expect(panel.getByText("Copy mode", { exact: true })).toBeVisible();
-  await expect(toolbar.getByRole("button", { name: "Session: Copy mode" })).toBeVisible();
-  await panel.getByRole("radio", { name: "Detailed" }).click();
-  const preview = panel.getByLabel("What Copy puts on the clipboard");
-  await expect(preview).toContainText("The user's comment:\n\nMake the Buy button violet");
-
-  await toolbar.getByRole("button", { name: "Copy all pins" }).click();
-  await expect(page.getByRole("status")).toHaveText(/Copied 1 pin \(detailed\)/);
+  // Skip connecting: the pins are copied by hand, at the chosen detail.
+  await panel.getByRole("button", { name: "Skip. I'll copy pins by hand." }).click();
+  await expect(panel.getByText("Copy by hand", { exact: true })).toBeVisible();
+  const onPage = panel.getByRole("region", { name: "On this page" });
+  await expect(onPage.getByRole("button", { name: "Open pin 1" })).toContainText(
+    "Make the Buy button violet",
+  );
+  await panel.getByRole("radio", { name: "Full" }).click();
+  await panel.getByRole("button", { name: "Copy 1 pin" }).click();
+  await expect(panel.getByRole("status")).toHaveText(/Copied 1 pin \(Full\)/);
 
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).toMatch(/^Squashflow pin \[sf-[0-9a-f]{12}\] copied from the user's browser/);
@@ -61,25 +61,22 @@ test("pin an element, comment on it and copy it", async () => {
   expect(copied).not.toContain("hunter2-secret");
   expect(copied).not.toContain("person@example.com");
 
-  // The panel's own Copy works too.
-  await page.evaluate(() => navigator.clipboard.writeText(""));
-  await panel.getByRole("button", { name: "Copy 1 pin" }).click();
-  await expect(panel.getByRole("status")).toHaveText(/Copied 1 pin \(detailed\)/);
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
-    "Make the Buy button violet",
-  );
-
-  // Open the draft, edit it, and the page's marker and the panel follow.
+  // Open the draft from its marker, copy just it, edit it, and the panel follows.
   await page.getByRole("button", { name: "Pin 1: draft" }).click();
+  await page.evaluate(() => navigator.clipboard.writeText(""));
+  await panel.getByRole("button", { name: "Copy pin 1" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("Make the Buy button violet");
   await panel.getByRole("button", { name: "Edit pin 1" }).click();
   await panel.getByRole("textbox", { name: "Edit comment" }).fill("Make the Buy button blue");
   await panel.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(panel.getByText("“Make the Buy button blue”")).toBeVisible();
+  await expect(panel.getByLabel("Your pin")).toHaveText("Make the Buy button blue");
 
   // The pin survives a reload, and Escape leaves pin mode.
   await page.reload();
   await harness.startPinMode(page);
-  await expect(panel.getByLabel("What Copy puts on the clipboard")).toContainText(
+  await expect(panel.getByRole("button", { name: "Open pin 1" })).toContainText(
     "Make the Buy button blue",
   );
   await page.keyboard.press("Escape");

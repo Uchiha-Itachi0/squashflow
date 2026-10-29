@@ -1,8 +1,8 @@
 /**
- * The side panel end to end: pair with the real helper, pick a session, pin on the
- * fixture page, press Go, confirm the previewed message, and follow the pin's thread
- * from Sent to Seen to Claude's reply to Fixed, then send a follow-up through the same
- * preview-then-confirm. The helper runs against a fake `claude`, fake inbox sockets and a
+ * The side panel end to end: pair with the real helper, pick a session in the sheet, pin
+ * on the fixture page, send it from the inbox, confirm the previewed message, and follow
+ * the pin's chat from Sent to Seen to Claude's reply to Fixed, then send a follow-up
+ * through the same preview-then-confirm. The helper runs against a fake `claude`, fake inbox sockets and a
  * fake transcript; the test checks that each inbox received exactly what was previewed.
  */
 
@@ -60,53 +60,58 @@ async function conversation(panel: Page): Promise<string[]> {
   return items.allInnerTexts();
 }
 
-test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
+test("pair, pick a session, pin, send, and follow the pin's chat", async () => {
   const panel = await harness.openPanel();
   const page = await harness.context.newPage();
   await page.goto(`${harness.origin}/`);
   await expect(panel.getByRole("button", { name: "Start pinning on this page" })).toBeVisible();
   await harness.startPinMode(page);
 
-  // Not paired yet: the panel asks to connect; copy works without it.
-  await expect(panel.getByRole("heading", { name: "Connect to your terminal" })).toBeVisible();
+  // Not connected yet: the inbox asks to connect; the page toolbar has only pin tools.
+  await expect(
+    panel.getByRole("heading", { name: "Click anything on the page. Claude fixes it." }),
+  ).toBeVisible();
   await expect(panel.getByText("Not connected")).toBeVisible();
   const toolbar = page.getByRole("toolbar", { name: "Squashflow toolbar" });
-  await expect(toolbar.getByRole("button", { name: "Session: Not connected" })).toBeVisible();
+  await expect(toolbar.getByRole("button")).toHaveText(["Element", "Text", "Area", "Multi", ""]);
 
   await pair(panel, "WRONG-CODE", helper.port);
   await expect(panel.getByRole("status")).toHaveText(/pairing code is wrong/);
   await pair(panel, helper.pairingCode, helper.port);
-  await expect(panel.getByText("Helper on")).toBeVisible();
+  await expect(panel.getByText("Connected. Now pick who fixes this site.")).toBeVisible();
 
-  // Two sessions and no site mapping: nothing is preselected, so the Sessions tab opens.
-  await expect(panel.getByRole("tab", { name: "Sessions" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  const demo = panel.getByRole("radio", { name: /e2e-demo/ });
+  // Two sessions and no site mapping: nothing is preselected, so the session sheet opens.
+  const sheet = panel.getByRole("dialog", { name: "Who fixes this site" });
+  const demo = sheet.getByRole("radio", { name: /e2e-demo/ });
   await expect(demo).not.toBeChecked();
-  await expect(panel.getByRole("radio", { name: /e2e-other/ })).not.toBeChecked();
-  // Each card: its name (no title yet, so its folder), then repository · branch · state.
-  const demoCard = panel.locator("label.ses", { has: demo });
+  await expect(sheet.getByRole("radio", { name: /e2e-other/ })).not.toBeChecked();
+  // Each card: its name (no title yet, so its folder), where it works, and whether it is free.
+  const demoCard = sheet.locator("label.ses", {
+    has: panel.getByRole("radio", { name: /e2e-demo/ }),
+  });
   await expect(demoCard.locator(".name b")).toHaveText("e2e-demo");
-  await expect(demoCard.locator(".where")).toHaveText(/^acme\/demo · .*idle/);
-  await expect(panel.getByTitle("Busy: picks pins up between steps")).toHaveText(/^busy/);
-  await expect(panel.getByRole("button", { name: "Start new session" })).toBeDisabled();
+  await expect(demoCard.locator(".where")).toHaveText(/^acme\/demo/);
+  await expect(demoCard.locator(".state")).toHaveText(/^Ready/);
+  await expect(sheet.getByText(/^Busy\. Reads pins between steps\./)).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Choose a session" })).toBeDisabled();
   await demo.check();
-  await panel.getByRole("checkbox", { name: /Remember: this site's code is acme\/demo/ }).check();
-  await expect(panel.getByText("Matches this site")).toBeVisible();
-  await panel.getByRole("button", { name: "Use e2e-demo" }).click();
-  await expect(toolbar.getByRole("button", { name: "Session: e2e-demo · idle" })).toBeVisible();
+  await sheet.getByRole("checkbox", { name: /Remember: this site's code is acme\/demo/ }).check();
+  await expect(demoCard.getByText("This site", { exact: true })).toBeVisible();
+  await sheet.getByRole("button", { name: "Use e2e-demo" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(panel.getByText("e2e-demo will fix this site.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Who fixes this site: e2e-demo" })).toBeVisible();
 
-  // Batch is the default: the pin waits as a draft until Go.
+  // Collecting is the default: the pin waits in Ready to send.
   await pinElement(page, "#buy", "Make the Buy button violet");
   expect(await page.evaluate(() => (window as unknown as { buyClicks: number }).buyClicks)).toBe(0);
-  await expect(panel.getByRole("button", { name: "Open pin 1" })).toContainText(
-    "Draft · waits for Go",
+  const ready = panel.getByRole("region", { name: "Ready to send" });
+  await expect(ready.getByRole("button", { name: "Open pin 1" })).toContainText(
+    "Make the Buy button violet",
   );
   const marker = page.locator("squashflow-root .marker").first();
   await expect(marker).not.toHaveAttribute("data-status");
-  await toolbar.getByRole("button", { name: "Go · send 1" }).click();
+  await panel.getByRole("button", { name: "Send 1 pin to Claude" }).click();
 
   const dialog = panel.getByRole("dialog", { name: "Message preview" });
   await expect(dialog).toBeVisible();
@@ -116,8 +121,8 @@ test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
   expect(previewed).not.toContain("hunter2-secret");
   expect(helper.inboxLines(DEMO.pid)).toHaveLength(0);
 
-  await dialog.getByRole("button", { name: "Send to claude@e2e-demo" }).click();
-  await expect(panel.getByRole("status")).toHaveText("Sent 1 pin to claude@e2e-demo.");
+  await dialog.getByRole("button", { name: "Send 1 pin to Claude" }).click();
+  await expect(panel.getByRole("status")).toHaveText("Sent 1 pin to e2e-demo.");
   await expect(dialog).toHaveCount(0);
   const line = JSON.parse(await helper.received(DEMO.pid)) as {
     type: string;
@@ -127,10 +132,15 @@ test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
   expect(line.message.content).toContain(`\n${previewed}\n</cross-session-message>`);
   expect(helper.inboxLines(OTHER.pid)).toHaveLength(0);
   await expect(marker).toHaveAttribute("data-status", "sent");
+  await expect(
+    panel.getByRole("region", { name: "Claude is on it" }).getByRole("button", {
+      name: "Open pin 1",
+    }),
+  ).toBeVisible();
 
-  // Open the pin: one conversation, the comment first, then what happened.
+  // Open the pin: one chat, the comment first, then what happened.
   await panel.getByRole("button", { name: "Open pin 1" }).click();
-  await expect(panel.getByText("“Make the Buy button violet”")).toBeVisible();
+  await expect(panel.getByLabel("Your pin")).toHaveText("Make the Buy button violet");
   await expect
     .poll(() => conversation(panel))
     .toEqual([expect.stringMatching(/^Sent to e2e-demo/)]);
@@ -171,6 +181,11 @@ test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
     "https://github.com/acme/demo/pull/5",
   );
 
+  // What was pinned stays behind Details.
+  await expect(panel.getByRole("region", { name: "Details" })).toHaveCount(0);
+  await panel.getByRole("button", { name: "Details" }).click();
+  await expect(panel.getByRole("region", { name: "Details" })).toContainText("#buy");
+
   // A follow-up goes to the same session, previewed first.
   await panel.getByRole("textbox", { name: "Reply to Claude" }).fill("Make it a bit darker");
   await panel.getByRole("button", { name: "Preview reply" }).click();
@@ -178,8 +193,8 @@ test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
   expect(followUp).toContain(`Follow-up to Squashflow pin [${pinId}]`);
   expect(followUp).toContain("Make it a bit darker");
   expect(helper.inboxLines(DEMO.pid)).toHaveLength(1);
-  await dialog.getByRole("button", { name: "Send to claude@e2e-demo" }).click();
-  await expect(panel.getByRole("status")).toHaveText("Sent your reply to claude@e2e-demo.");
+  await dialog.getByRole("button", { name: "Send reply to Claude" }).click();
+  await expect(panel.getByRole("status")).toHaveText("Sent your reply to e2e-demo.");
   await expect.poll(() => helper.inboxLines(DEMO.pid).length).toBe(2);
   const delivered = JSON.parse(helper.inboxLines(DEMO.pid)[1] ?? "{}") as {
     message: { content: string };
@@ -187,10 +202,10 @@ test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
   expect(delivered.message.content).toContain(`\n${followUp}\n</cross-session-message>`);
   await expect(panel.getByLabel("Your reply")).toHaveText("Make it a bit darker");
   await expect.poll(async () => (await conversation(panel)).at(-1)).toMatch(/^Sent to e2e-demo/);
-  // The earlier reply stays in the thread.
+  // The earlier reply stays in the chat.
   await expect(reply).toBeVisible();
 
-  await panel.getByRole("button", { name: "Resolve pin 1" }).click();
+  await panel.getByRole("button", { name: "Mark done pin 1" }).click();
   await expect(marker).toHaveAttribute("data-status", "resolved");
   await panel.getByRole("button", { name: "Reopen pin 1" }).click();
   await expect(marker).toHaveAttribute("data-status", "sent");
@@ -210,11 +225,10 @@ test("pair, pick a session, pin, Go, and follow the pin's thread", async () => {
   // The remembered site preselects its only matching session next time.
   await page.reload();
   await harness.startPinMode(page);
-  await expect(panel.getByText("Sending to")).toContainText("e2e-demo");
+  await expect(panel.getByRole("button", { name: "Who fixes this site: e2e-demo" })).toBeVisible();
 
-  await panel.getByRole("tab", { name: "Settings" }).click();
-  await panel.getByRole("button", { name: "Forget pairing" }).click();
-  await panel.getByRole("tab", { name: /Pins/ }).click();
-  await expect(panel.getByRole("heading", { name: "Connect to your terminal" })).toBeVisible();
-  await expect(toolbar.getByRole("button", { name: "Copy all pins" })).toBeEnabled();
+  await panel.getByRole("button", { name: "Settings" }).click();
+  await panel.getByRole("button", { name: "Disconnect" }).click();
+  await panel.getByRole("button", { name: "Back to all pins" }).click();
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
 });

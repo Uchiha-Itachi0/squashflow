@@ -5,8 +5,9 @@
  * pin them together; Shift+click does the same in Element). Escape closes the comment
  * box, then clears a selection, then exits.
  * Each new pin gets a region screenshot of the visible tab, taken with the pin UI hidden.
- * The page shows only the toolbar, the markers and the comment box; the side panel,
- * connected through `PanelLink`, does everything else, including every helper call.
+ * The page shows only the pin tools, the markers and the comment box; the side panel,
+ * connected through `PanelLink`, does everything else: sending, copying, the session,
+ * and every helper call.
  */
 
 import type { PageContext, Rect, Screenshot } from "@squashflow/shared";
@@ -18,15 +19,7 @@ import {
   type ScreenshotRequest,
 } from "../capture/screenshot";
 import { DRAG_THRESHOLD_PX, HOST_TAG } from "../constants";
-import { copyPins } from "../copy/copy";
-import type { ToolbarTarget } from "../panel/protocol";
-import {
-  DEFAULT_SETTINGS,
-  SettingsStore,
-  watchSettings,
-  type SendMode,
-  type Settings,
-} from "../settings";
+import { DEFAULT_SETTINGS, SettingsStore, watchSettings, type Settings } from "../settings";
 import { shownLabel, shownStatus, type PinStatuses } from "../status/pin-status";
 import { chromeStatusSource, type StatusSource } from "../status/store";
 import { pinPageUrl, watchPins, type PinStore, type StoredPin } from "../store/pins";
@@ -51,7 +44,6 @@ export class PinMode {
   private pins: StoredPin[] = [];
   private mode: PinModeKind = "element";
   private settings: Settings = DEFAULT_SETTINGS;
-  private target: ToolbarTarget | null = null;
   private selection: Element[] = [];
   private drag: Drag | null = null;
   /** Set while a new pin's screenshot is being taken; further pins wait for it. */
@@ -68,10 +60,6 @@ export class PinMode {
   ) {
     this.link = new PanelLink({
       pageUrl: () => pinPageUrl(location.href),
-      onTarget: (target) => {
-        this.target = target;
-        this.renderToolbar();
-      },
       onStop: () => this.stop(),
     });
   }
@@ -333,9 +321,9 @@ export class PinMode {
   }
 
   private saveHint(): string {
-    if (this.settings.copyOnly) return "Saved here · copy any time";
-    if (this.sendsEachPin()) return "Send now · you preview it first";
-    return "Batch on · sends with Go";
+    if (this.settings.copyOnly) return "Saved here · copy it from the side panel";
+    if (this.sendsEachPin()) return "You check it in the side panel before it goes";
+    return "Send it from the side panel";
   }
 
   // ---- toolbar ----
@@ -344,34 +332,6 @@ export class PinMode {
     this.mode = mode;
     this.setSelection([]);
     this.view.showHover(null);
-  }
-
-  private setSendMode(sendMode: SendMode): void {
-    void this.run(async () => {
-      this.settings = await this.settingsStore.change({ sendMode });
-      this.render();
-    });
-  }
-
-  private copyAll(): void {
-    if (this.pins.length === 0) {
-      this.setStatus("No pins on this page yet. Click something to pin it.");
-      return;
-    }
-    void this.run(async () => {
-      const { level } = this.settings;
-      const result = await copyPins(
-        { pins: this.pins, level, pageUrl: pinPageUrl(location.href) },
-        this.view.host.shadowRoot ?? this.view.host,
-      );
-      const what = this.pins.length === 1 ? "1 pin" : `${this.pins.length} pins`;
-      const image = result.imageAttached ? " and the screenshot" : "";
-      this.setStatus(`Copied ${what}${image} (${level}). Paste into your Claude Code session.`);
-    });
-  }
-
-  private drafts(): StoredPin[] {
-    return this.pins.filter((pin) => this.statuses[pin.id] === undefined);
   }
 
   // ---- rendering ----
@@ -389,16 +349,9 @@ export class PinMode {
   private renderToolbar(): void {
     this.view.renderToolbar({
       mode: this.mode,
-      target: this.target,
-      sendMode: this.settings.sendMode,
-      drafts: this.drafts().length,
       selected: this.selection.length,
       onMode: (mode) => this.setMode(mode),
-      onSendMode: (mode) => this.setSendMode(mode),
-      onSession: () => this.link.send({ type: "open-tab", tab: "sessions" }),
       onPinSelection: () => this.pinSelection(),
-      onCopy: () => this.copyAll(),
-      onGo: () => this.link.send({ type: "go" }),
       onClose: () => this.stop(),
     });
   }

@@ -89,8 +89,8 @@ test("pin an area, send it, and the session gets its screenshot", async () => {
   expect(previewed).toContain("<untrusted-page-screenshots>");
   expect(previewed).toContain(`read the image file ${file} (SHA-256 ${sha256})`);
 
-  await dialog.getByRole("button", { name: "Send to claude@e2e-shots" }).click();
-  await expect(panel.getByRole("status")).toHaveText("Sent 1 pin to claude@e2e-shots.");
+  await dialog.getByRole("button", { name: "Send 1 pin to Claude" }).click();
+  await expect(panel.getByRole("status")).toHaveText("Sent 1 pin to e2e-shots.");
   const line = JSON.parse(await helper.received(DEMO.pid)) as { message: { content: string } };
   expect(line.message.content).toContain(`\n${previewed}\n</cross-session-message>`);
   expect(line.message.content).not.toContain(shot?.data.slice(0, 40));
