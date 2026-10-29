@@ -92,6 +92,9 @@ export class PanelApp {
       this.statuses = statuses;
       this.render();
     });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.back()) event.preventDefault();
+    });
     this.render();
     await this.link.start();
     await this.send.start();
@@ -337,6 +340,27 @@ export class PanelApp {
     this.detailsOpen = false;
     this.fields.reply.value = "";
     this.render();
+  }
+
+  /**
+   * Escape steps back one level: out of the preview, the session sheet, editing, a pin's
+   * chat, or Settings, to the pins. Whether there was anywhere to go back from.
+   */
+  private back(): boolean {
+    if (this.send.state.preview !== null) {
+      this.actions.cancelPreview();
+    } else if (this.sheet !== null) {
+      this.actions.closeSessions();
+    } else if (this.editing) {
+      this.actions.cancelEdit();
+    } else if (this.openPinId !== null) {
+      this.actions.closePin();
+    } else if (this.screen === "settings") {
+      this.actions.closeSettings();
+    } else {
+      return false;
+    }
+    return true;
   }
 
   /** Preview every draft on the page; nothing is delivered until the user confirms. */

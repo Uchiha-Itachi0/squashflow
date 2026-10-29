@@ -30,19 +30,23 @@ export function header(model: PanelModel, actions: PanelActions): HTMLElement {
   ]);
 }
 
-/** A screen's own header: back to the inbox, and its title. */
+/**
+ * A screen's own header: a labelled way back to the pins (Escape does the same), and
+ * the screen's title.
+ */
 export function backHeader(title: string, onBack: () => void, end: Child = null): HTMLElement {
   return h("header", { className: "thread-top" }, [
     h(
       "button",
       {
-        className: "icon-btn",
-        attrs: { type: "button", "aria-label": "Back to all pins" },
+        className: "back-btn",
+        attrs: { type: "button", "aria-label": "Back to all pins", title: "Back (Esc)" },
         on: { click: onBack },
       },
-      [icon("back")],
+      [icon("back", 2.4), h("span", { text: "Pins" })],
     ),
-    h("b", { text: title, attrs: { style: "font-size: 15px" } }),
+    h("span", { className: "divider", attrs: { "aria-hidden": "true" } }),
+    h("b", { className: "screen-title", text: title }),
     h("span", { className: "spacer" }),
     end,
   ]);

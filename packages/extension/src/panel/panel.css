@@ -206,6 +206,36 @@ a {
   gap: 8px;
   border-bottom: 1px solid var(--line);
 }
+.back-btn {
+  height: 34px;
+  padding: 0 10px 0 6px;
+  margin-left: -4px;
+  border-radius: 99px;
+  border: 1px solid var(--line-2);
+  background: var(--card);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+.back-btn:hover {
+  background: var(--wash);
+  border-color: transparent;
+}
+.back-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.thread-top .divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line-2);
+}
+.screen-title {
+  font-size: 15px;
+}
 .icon-btn {
   width: 40px;
   height: 40px;
@@ -625,6 +655,64 @@ a {
   border-color: var(--needs);
   color: #ffffff;
 }
+.pin-dot.pulse {
+  animation: pulse 1.6s ease-out infinite;
+}
+.pin .working-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--accent-text);
+  font-weight: 500;
+}
+.hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.no-pins {
+  padding: 18px 16px;
+  border: 1px dashed var(--line-2);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.no-pins .squish svg {
+  width: 64px;
+  height: 55px;
+}
+.no-pins .how {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--body);
+}
+.no-pins .how li {
+  counter-increment: how;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.no-pins .how li::before {
+  content: counter(how);
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 99px;
+  background: var(--wash);
+  color: var(--accent-text);
+  font: 600 11px/18px var(--mono);
+  text-align: center;
+}
 .pin-dot svg {
   width: 13px;
   height: 13px;
@@ -672,16 +760,60 @@ a {
 
 /* ---- pin chat (B4) ---- */
 .thread {
-  padding: 16px;
+  padding: 14px 14px 18px;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
-.context {
+.pinned {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(21, 21, 26, 0.05);
+}
+.shot-frame {
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+  background: repeating-conic-gradient(#f3f3f0 0% 25%, #fafaf8 0% 50%) 0 0 / 14px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.shot {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(21, 21, 26, 0.18);
+}
+.pinned .where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.where-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.where-text .eyebrow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.where-text .what {
+  font-size: 12px;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
 }
 .context dl {
   margin: 0;
@@ -714,19 +846,28 @@ a {
 }
 .sys {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.sys .line {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  align-items: flex-start;
-  font-size: 12px;
-  color: var(--muted);
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: var(--sand);
+  font-size: 11.5px;
+  color: var(--body);
+  overflow-wrap: anywhere;
 }
 .sys .sd {
   flex-shrink: 0;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 99px;
-  margin-top: 4px;
-  background: #c9c9c4;
+  background: #a9a9a3;
 }
 .sys .sd.accent {
   background: var(--accent);
@@ -740,12 +881,6 @@ a {
 .sys .sd.danger {
   background: var(--danger);
 }
-.sys .body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
 .sys .when {
   color: var(--muted);
 }
@@ -753,14 +888,16 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
-  padding: 0 12px;
+  height: 38px;
+  padding: 0 14px;
   border-radius: 10px;
   border: 1px solid var(--line-2);
   background: var(--card);
   text-decoration: none;
   font-size: 13px;
-  align-self: flex-start;
+}
+.pr-card:hover {
+  border-color: var(--accent);
 }
 .pr-card svg {
   width: 16px;
@@ -775,14 +912,15 @@ a {
 }
 .msg .text {
   min-width: 0;
-  padding: 10px 12px;
-  border-radius: 14px 14px 14px 4px;
+  padding: 10px 13px;
+  border-radius: 16px 16px 16px 4px;
   background: var(--card);
   border: 1px solid var(--line);
   font-size: 14px;
   line-height: 1.5;
   color: var(--body);
   overflow-wrap: anywhere;
+  box-shadow: 0 1px 2px rgba(21, 21, 26, 0.04);
 }
 .msg .text p,
 .msg .text ul,
@@ -812,48 +950,229 @@ a {
 .msg .from {
   font-size: 11.5px;
   color: var(--muted);
+  padding: 0 4px;
 }
 .msg.you {
   align-self: flex-end;
   align-items: flex-end;
 }
 .msg.you .text {
-  background: var(--wash);
+  background: var(--accent);
   border-color: transparent;
-  color: var(--text);
-  border-radius: 14px 14px 4px 14px;
+  color: #ffffff;
+  border-radius: 16px 16px 4px 16px;
   white-space: pre-wrap;
-}
-.msg .shot {
-  max-width: 220px;
-  max-height: 160px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgba(91, 75, 255, 0.25);
 }
 .convo > li:has(.msg.you) {
   display: flex;
   justify-content: flex-end;
 }
+.msg.claude {
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 94%;
+}
+.msg.claude .bubble {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+  background: var(--wash);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+.avatar svg {
+  width: 22px;
+  height: 20px;
+}
+
+/* Claude has the pin: Squish bobs and the dots bounce until its answer lands. */
+.in-progress .text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-text);
+  font-weight: 500;
+  background: linear-gradient(90deg, var(--card) 0%, var(--wash) 50%, var(--card) 100%) 0 0 / 200%
+    100%;
+  animation: shimmer 2.4s linear infinite;
+}
+.in-progress.squashing .avatar {
+  animation: bob 1.1s ease-in-out infinite;
+}
+.dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: currentColor;
+  animation: bounce 1.2s ease-in-out infinite;
+}
+.dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.04, 0.94);
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(91, 75, 255, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(91, 75, 255, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .in-progress .text,
+  .in-progress .avatar,
+  .dots i,
+  .pin-dot.pulse {
+    animation: none;
+  }
+}
+
+/* ---- the pin's actions and the composer ---- */
+.chat-foot {
+  padding-top: 10px;
+  gap: 10px;
+}
+.act-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.act {
+  height: 30px;
+  padding: 0 11px 0 9px;
+  border-radius: 99px;
+  border: 1px solid var(--line-2);
+  background: var(--card);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--body);
+  white-space: nowrap;
+}
+.act:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.act svg {
+  width: 14px;
+  height: 14px;
+}
+.act.ok:hover {
+  border-color: var(--ok);
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+.act.danger:hover {
+  border-color: var(--danger);
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+.act.quiet {
+  flex-shrink: 0;
+  border-color: transparent;
+  background: var(--sand);
+}
 .composer {
   display: flex;
-  gap: 8px;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 4px 4px 4px 6px;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+  background: var(--card);
+}
+.composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--wash);
 }
 .composer textarea {
   flex: 1 1 auto;
   min-width: 0;
-  height: 44px;
+  height: 38px;
   max-height: 120px;
-  resize: vertical;
-  border-radius: 10px;
-  border: 1px solid var(--line-2);
-  padding: 11px 12px;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 9px 6px;
   font-size: 14px;
-  background: var(--card);
+  background: transparent;
   color: var(--text);
   line-height: 1.4;
 }
-.composer .btn {
-  height: 44px;
+.send-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.send-btn.quiet {
+  background: var(--sand);
+  color: var(--text);
+}
+.send-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.editor .row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 .edit-box {
   width: 100%;

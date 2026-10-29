@@ -45,7 +45,11 @@ test("pin an element, comment on it and copy it", async () => {
   await expect(onPage.getByRole("button", { name: "Open pin 1" })).toContainText(
     "Make the Buy button violet",
   );
+  // How much a copy includes lives in Settings; Escape comes back to the pins.
+  await panel.getByRole("button", { name: "Change in Settings" }).click();
   await panel.getByRole("radio", { name: "Full" }).click();
+  await panel.keyboard.press("Escape");
+  await expect(panel.getByText(/^Includes: Full\./)).toBeVisible();
   await panel.getByRole("button", { name: "Copy 1 pin" }).click();
   await expect(panel.getByRole("status")).toHaveText(/Copied 1 pin \(Full\)/);
 

@@ -1,6 +1,12 @@
 import type { PinRecord } from "@squashflow/shared";
 import { describe, expect, it } from "vitest";
-import { buildThread, inboxGroup, pinState, replyForDisplay } from "../src/panel/thread";
+import {
+  buildThread,
+  inboxGroup,
+  pinProgress,
+  pinState,
+  replyForDisplay,
+} from "../src/panel/thread";
 import { applyRecord, setResolved, trackSent, type PinTracking } from "../src/status/pin-status";
 import type { StoredPin } from "../src/store/pins";
 
@@ -144,5 +150,62 @@ describe("a pin's thread", () => {
     expect(inboxGroup("draft")).toBe("ready");
     expect(inboxGroup("fixed")).toBe("fixed");
     expect(inboxGroup("resolved")).toBe("fixed");
+  });
+});
+
+describe("a pin's progress", () => {
+  const tracked = (statuses: Record<string, PinTracking>): PinTracking => {
+    const tracking = statuses[PIN];
+    if (tracking === undefined) throw new Error("not tracked");
+    return tracking;
+  };
+  const sent = trackSent({}, [PIN], record({}), T0 + 60_000);
+  const seen = applyRecord(
+    sent,
+    record({ status: "seen", statusLabel: "Seen by Claude", revision: 1, updatedAt: at(2) }),
+    0,
+  );
+
+  it("is nothing for a draft", () => {
+    expect(pinProgress(undefined)).toBeNull();
+  });
+
+  it("waits while the pin is only Sent, and squashes once Claude has seen it", () => {
+    expect(pinProgress(tracked(sent))).toBe("waiting");
+    expect(pinProgress(tracked(seen))).toBe("squashing");
+  });
+
+  it("ends when Claude replies, even before the pin is Fixed", () => {
+    const replied = applyRecord(
+      seen,
+      record({
+        status: "seen",
+        statusLabel: "Seen by Claude",
+        thread: [
+          { id: `${MESSAGE}-1`, from: "claude", text: "On it.", truncated: false, at: at(3) },
+        ],
+        revision: 2,
+        updatedAt: at(3),
+      }),
+      0,
+    );
+    expect(pinProgress(tracked(replied))).toBeNull();
+  });
+
+  it("ends when the pin is Fixed, Resolved, or no longer followed", () => {
+    expect(pinProgress(fixedTracking())).toBeNull();
+    expect(pinProgress(tracked(setResolved(seen, PIN, true, T0)))).toBeNull();
+    expect(pinProgress({ ...tracked(seen), inFlight: false })).toBeNull();
+  });
+
+  it("starts again with a follow-up", () => {
+    const followUp = trackSent(
+      { [PIN]: fixedTracking() },
+      [PIN],
+      record({ id: "sf-ffffffffffff" }),
+      T0 + 10 * 60_000,
+      "Darker please",
+    );
+    expect(pinProgress(tracked(followUp))).toBe("waiting");
   });
 });
