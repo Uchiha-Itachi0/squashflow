@@ -138,12 +138,27 @@ test("pair, pick a session, pin, send, and follow the pin's chat", async () => {
     }),
   ).toBeVisible();
 
+  // Until Claude answers, the pin says it is waiting for Claude, animated.
+  await expect(panel.getByRole("button", { name: "Open pin 1" })).toContainText(
+    "Waiting for Claude to pick this up",
+  );
+
   // Open the pin: one chat, the comment first, then what happened.
   await panel.getByRole("button", { name: "Open pin 1" }).click();
   await expect(panel.getByLabel("Your pin")).toHaveText("Make the Buy button violet");
   await expect
     .poll(() => conversation(panel))
     .toEqual([expect.stringMatching(/^Sent to e2e-demo/)]);
+  const working = panel.locator(".in-progress");
+  await expect(working).toHaveText(/Waiting for Claude to pick this up/);
+
+  // The back button and Escape both lead back to the pins.
+  await panel.getByRole("button", { name: "Back to all pins" }).click();
+  await expect(panel.getByRole("region", { name: "Claude is on it" })).toBeVisible();
+  await panel.getByRole("button", { name: "Open pin 1" }).click();
+  await panel.keyboard.press("Escape");
+  await expect(panel.getByRole("region", { name: "Claude is on it" })).toBeVisible();
+  await panel.getByRole("button", { name: "Open pin 1" }).click();
 
   await seen(line.message.content);
   await expect(marker).toHaveAttribute("data-status", "seen");
@@ -153,6 +168,7 @@ test("pair, pick a session, pin, send, and follow the pin's chat", async () => {
       expect.stringMatching(/^Sent to e2e-demo/),
       expect.stringMatching(/^Seen by Claude/),
     ]);
+  await expect(working).toHaveText(/Claude is squashing this/);
 
   // Claude replies with the pin's fixed line. The markdown renders, its markup never does.
   const pinId = /\[(sf-[0-9a-f]{12})\]/.exec(previewed)?.[1] ?? "";
@@ -173,6 +189,7 @@ test("pair, pick a session, pin, send, and follow the pin's chat", async () => {
       expect.stringMatching(/Made the Buy button violet\. <img src=x onerror=alert\(1\)>/),
       expect.stringMatching(/^Fixed/),
     ]);
+  await expect(working).toHaveCount(0);
   const reply = panel.getByLabel("Claude's reply").first();
   await expect(reply.locator("strong")).toHaveText("Buy");
   expect(await panel.locator("img[src='x']").count()).toBe(0);

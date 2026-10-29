@@ -1,22 +1,32 @@
 /**
- * B4, one pin as a chat: the user's comment (with its screenshot) first, then status
- * changes as small grey lines, Claude's replies as bubbles (safe markdown, see
- * markdown.ts), and the user's follow-ups. A composer at the bottom sends a follow-up to
- * the same session, previewed like any pin; rare actions are quiet links, and what was
- * pinned (selector, size, source) sits behind Details. A pin Blocked on GitHub access
- * gets the dark "Needs you" card, below the newest message, with the best way out and
- * the others as links.
+ * B4, one pin as a chat. On top, a card with what was pinned: the screenshot, the page
+ * and the element, and the technical details behind its Details button. Then the
+ * conversation: the user's comment and follow-ups as violet bubbles on the right,
+ * Claude's replies (safe markdown, see markdown.ts) as white bubbles with Squish on the
+ * left, and status changes as small centred lines. While Claude has the pin and has not
+ * answered yet, an animated "Claude is squashing this" bubble stands where its reply
+ * will land. A pin Blocked on GitHub access gets the dark "Needs you" card below the
+ * newest message. The footer holds the composer and the pin's actions as a row of
+ * buttons.
  */
 
 import { shownLabel } from "../../status/pin-status";
 import type { StoredPin } from "../../store/pins";
 import { h, type Child } from "../../ui/dom";
-import { icon } from "../../ui/icons";
+import { icon, markup, type IconName } from "../../ui/icons";
 import { renderMarkdown } from "../../ui/markdown";
+import { squishFace } from "../../ui/squish";
 import { clockTime, pullRequestLabel, shortUrl } from "../format";
 import type { GitHubBlockView, GitHubChoice } from "../github-actions";
 import type { PanelActions, PanelModel } from "../model";
-import { buildThread, pinState, type ThreadItem } from "../thread";
+import {
+  buildThread,
+  pinProgress,
+  pinState,
+  PROGRESS_LABELS,
+  type PinProgress,
+  type ThreadItem,
+} from "../thread";
 import { stateChip } from "./pins";
 import { backHeader, sendLabel } from "./shell";
 
@@ -29,6 +39,7 @@ export function threadView(
   const tracking = model.statuses[pin.id];
   const state = pinState(tracking);
   const github = state === "blocked" ? model.github(pin.id) : null;
+  const progress = pinProgress(tracking);
   const items = buildThread(pin, tracking);
   return [
     backHeader(
@@ -44,16 +55,17 @@ export function threadView(
           attrs: { role: "log", "aria-label": `Conversation for pin ${number}` },
         },
         [
+          pinnedCard(model, actions, pin),
           model.editing ? editor(model, actions, pin) : yourPin(pin),
           h(
             "ol",
             { className: "convo" },
             items.slice(1).map((item) => h("li", {}, [threadItem(item)])),
           ),
-          // Last, like the newest message: the chat opens scrolled to it.
+          // Where Claude's answer will land, so the chat opens scrolled to it.
+          progress !== null && working(progress),
           github !== null &&
             alertCard(github, model.send.busy, (choice) => actions.gitHub(pin.id, choice)),
-          model.detailsOpen && details(pin, actions),
         ],
       ),
     ]),
@@ -61,18 +73,47 @@ export function threadView(
   ];
 }
 
-/** The comment as the first message of the chat, with the screenshot of what was pinned. */
-function yourPin(pin: StoredPin): HTMLElement {
-  const { screenshot } = pin;
-  return h("div", { className: "msg you" }, [
+/** What was pinned: the screenshot, where it is, and the technical details on demand. */
+function pinnedCard(model: PanelModel, actions: PanelActions, pin: StoredPin): HTMLElement {
+  const { context, screenshot } = pin;
+  // A Multi pin names how many elements it holds; Details lists each.
+  const what =
+    context.kind === "elements"
+      ? `${1 + (context.elements ?? []).length} elements`
+      : (context.selectedText ?? context.selector);
+  return h("section", { className: "pinned", attrs: { "aria-label": "What you pinned" } }, [
     screenshot !== undefined &&
-      h("img", {
-        className: "shot",
-        attrs: {
-          src: `data:${screenshot.type};base64,${screenshot.data}`,
-          alt: "Screenshot of the pinned region",
+      h("div", { className: "shot-frame" }, [
+        h("img", {
+          className: "shot",
+          attrs: {
+            src: `data:${screenshot.type};base64,${screenshot.data}`,
+            alt: "Screenshot of the pinned region",
+          },
+        }),
+      ]),
+    h("div", { className: "where" }, [
+      h("span", { className: "where-text" }, [
+        h("span", { className: "eyebrow", text: `Pinned on ${shortUrl(pin.pageUrl)}` }),
+        what !== undefined && what !== "" && h("span", { className: "what mono", text: what }),
+      ]),
+      h(
+        "button",
+        {
+          className: "act quiet",
+          attrs: { type: "button", "aria-expanded": String(model.detailsOpen) },
+          on: { click: actions.toggleDetails },
         },
-      }),
+        [icon("info"), model.detailsOpen ? "Hide details" : "Details"],
+      ),
+    ]),
+    model.detailsOpen && details(pin, actions),
+  ]);
+}
+
+/** The comment as the first message of the chat. */
+function yourPin(pin: StoredPin): HTMLElement {
+  return h("div", { className: "msg you" }, [
     h("div", { className: "text", text: pin.comment, attrs: { "aria-label": "Your pin" } }),
     h("span", { className: "from", text: `You · ${clockTime(pin.createdAt)}` }),
   ]);
@@ -87,8 +128,7 @@ function threadItem(item: ThreadItem): HTMLElement {
         h("span", { className: "from", text: `You · ${clockTime(item.at)}` }),
       ]);
     case "reply":
-      return h("div", { className: "msg" }, [
-        h("span", { className: "from", text: `Claude · ${clockTime(item.at)}` }),
+      return claudeSays(`Claude · ${clockTime(item.at)}`, [
         h("div", { className: "text", attrs: { "aria-label": "Claude's reply" } }, [
           ...renderMarkdown(item.text),
           item.truncated && h("p", { className: "cut", text: "… (cut)" }),
@@ -96,29 +136,60 @@ function threadItem(item: ThreadItem): HTMLElement {
       ]);
     case "event":
       return h("div", { className: "sys" }, [
-        h("span", { className: `sd ${item.tone}` }),
-        h("span", { className: "body" }, [
-          h("span", {}, [
-            item.label,
-            h("span", { className: "when", text: ` · ${clockTime(item.at)}` }),
-          ]),
-          item.pullRequestUrl !== null &&
-            h(
-              "a",
-              {
-                className: "pr-card",
-                attrs: {
-                  href: item.pullRequestUrl,
-                  target: "_blank",
-                  rel: "noopener noreferrer",
-                  "aria-label": "Pull request",
-                },
-              },
-              [icon("pr"), h("b", { text: pullRequestLabel(item.pullRequestUrl) })],
-            ),
+        h("span", { className: "line" }, [
+          h("span", { className: `sd ${item.tone}` }),
+          item.label,
+          h("span", { className: "when", text: `· ${clockTime(item.at)}` }),
         ]),
+        item.pullRequestUrl !== null &&
+          h(
+            "a",
+            {
+              className: "pr-card",
+              attrs: {
+                href: item.pullRequestUrl,
+                target: "_blank",
+                rel: "noopener noreferrer",
+                "aria-label": "Pull request",
+              },
+            },
+            [icon("pr"), h("b", { text: pullRequestLabel(item.pullRequestUrl) })],
+          ),
       ]);
   }
+}
+
+/** A message on Claude's side of the chat, with Squish as its avatar. */
+function claudeSays(
+  from: string,
+  body: Child[],
+  mood: "waiting" | "working" = "waiting",
+): HTMLElement {
+  return h("div", { className: "msg claude" }, [
+    h("span", { className: `avatar ${mood}` }, [markup(squishFace(mood))]),
+    h("div", { className: "bubble" }, [h("span", { className: "from", text: from }), ...body]),
+  ]);
+}
+
+/** Claude has the pin and has not answered yet: an animated bubble where its reply goes. */
+function working(progress: PinProgress): HTMLElement {
+  const label = PROGRESS_LABELS[progress];
+  return h("div", { className: `in-progress ${progress}`, attrs: { "aria-live": "polite" } }, [
+    claudeSays(
+      "Claude",
+      [
+        h("div", { className: "text" }, [
+          h("span", { text: label }),
+          h("span", { className: "dots", attrs: { "aria-hidden": "true" } }, [
+            h("i"),
+            h("i"),
+            h("i"),
+          ]),
+        ]),
+      ],
+      progress === "squashing" ? "working" : "waiting",
+    ),
+  ]);
 }
 
 /** What was pinned, for whoever wants the technical details. */
@@ -152,12 +223,9 @@ function details(pin: StoredPin, actions: PanelActions): HTMLElement {
     ),
     screenshot !== undefined &&
       h("div", { className: "actions" }, [
-        h("button", {
-          className: "btn tiny",
-          text: "Copy screenshot",
-          attrs: { type: "button" },
-          on: { click: () => actions.copyScreenshot(pin.id) },
-        }),
+        actionButton("copy", "Copy screenshot", "Copy screenshot", () =>
+          actions.copyScreenshot(pin.id),
+        ),
       ]),
   ]);
 }
@@ -173,10 +241,10 @@ function elementRows(context: StoredPin["context"]): [string, string | undefined
 
 function editor(model: PanelModel, actions: PanelActions, pin: StoredPin): HTMLElement {
   const { edit } = model.fields;
-  return h("div", { attrs: { style: "display: flex; flex-direction: column; gap: 8px" } }, [
+  return h("div", { className: "editor" }, [
     h("label", { className: "sr-only", text: "Edit comment", attrs: { for: "edit-comment" } }),
     edit,
-    h("div", { attrs: { style: "display: flex; gap: 8px; justify-content: flex-end" } }, [
+    h("div", { className: "row" }, [
       h("button", {
         className: "btn small",
         text: "Cancel",
@@ -184,7 +252,7 @@ function editor(model: PanelModel, actions: PanelActions, pin: StoredPin): HTMLE
         on: { click: actions.cancelEdit },
       }),
       h("button", {
-        className: "btn small",
+        className: "btn small primary",
         text: "Save",
         attrs: { type: "button" },
         on: { click: () => actions.saveEdit(pin.id) },
@@ -210,29 +278,34 @@ function footer(
       actions.reply(pin.id);
     }
   };
-  return h("footer", { className: "foot" }, [
-    h("label", { className: "sr-only", text: "Reply to Claude", attrs: { for: "reply" } }),
-    h("div", { className: "composer" }, [
-      reply,
-      h("button", {
-        // The "Needs you" card holds this screen's one primary button.
-        className: needsYou ? "btn small" : "btn primary small",
-        text: "Send",
-        attrs: {
-          type: "button",
-          "aria-label": "Preview reply",
-          ...(model.send.busy ? { disabled: "" } : {}),
-        },
-        on: { click: () => actions.reply(pin.id) },
-      }),
-    ]),
-    quietLinks([
-      linkButton("Copy", `Copy pin ${number}`, () => actions.copyPin(pin.id)),
-      detailsLink(model, actions),
-      linkButton(
+  return h("footer", { className: "foot chat-foot" }, [
+    actionBar([
+      actionButton("copy", "Copy", `Copy pin ${number}`, () => actions.copyPin(pin.id)),
+      actionButton(
+        resolved ? "undo" : "check",
         resolved ? "Reopen" : "Mark done",
         `${resolved ? "Reopen" : "Mark done"} pin ${number}`,
         () => actions.resolve(pin.id, !resolved),
+        resolved ? "" : "ok",
+      ),
+    ]),
+    h("label", { className: "sr-only", text: "Reply to Claude", attrs: { for: "reply" } }),
+    h("div", { className: "composer" }, [
+      reply,
+      h(
+        "button",
+        {
+          // The "Needs you" card holds this screen's one primary button.
+          className: needsYou ? "send-btn quiet" : "send-btn",
+          attrs: {
+            type: "button",
+            "aria-label": "Preview reply",
+            title: "Send (you see it first)",
+            ...(model.send.busy ? { disabled: "" } : {}),
+          },
+          on: { click: () => actions.reply(pin.id) },
+        },
+        [icon("up", 2.4)],
       ),
     ]),
   ]);
@@ -245,7 +318,19 @@ function draftFooter(
   number: number,
 ): HTMLElement {
   const copyOnly = model.settings.copyOnly;
-  return h("footer", { className: "foot" }, [
+  return h("footer", { className: "foot chat-foot" }, [
+    actionBar([
+      actionButton("edit", "Edit", `Edit pin ${number}`, actions.startEdit),
+      !copyOnly &&
+        actionButton("copy", "Copy", `Copy pin ${number}`, () => actions.copyPin(pin.id)),
+      actionButton(
+        "trash",
+        "Delete",
+        `Delete pin ${number}`,
+        () => actions.deletePin(pin.id),
+        "danger",
+      ),
+    ]),
     h("button", {
       className: "btn primary",
       text: copyOnly ? "Copy 1 pin" : sendLabel(1),
@@ -256,40 +341,34 @@ function draftFooter(
       },
       on: { click: () => (copyOnly ? actions.copyPin(pin.id) : actions.sendPin(pin.id)) },
     }),
-    quietLinks([
-      linkButton("Edit", `Edit pin ${number}`, actions.startEdit),
-      !copyOnly && linkButton("Copy", `Copy pin ${number}`, () => actions.copyPin(pin.id)),
-      detailsLink(model, actions),
-      linkButton("Delete", `Delete pin ${number}`, () => actions.deletePin(pin.id)),
-    ]),
   ]);
 }
 
-function detailsLink(model: PanelModel, actions: PanelActions): HTMLButtonElement {
-  const link = linkButton(
-    model.detailsOpen ? "Hide details" : "Details",
-    "",
-    actions.toggleDetails,
+/** A small labelled button: the pin's actions, in a row above the composer. */
+function actionButton(
+  name: IconName,
+  text: string,
+  label: string,
+  onClick: () => void,
+  tone = "",
+): HTMLButtonElement {
+  return h(
+    "button",
+    {
+      className: tone === "" ? "act" : `act ${tone}`,
+      attrs: { type: "button", "aria-label": label },
+      on: { click: onClick },
+    },
+    [icon(name), text],
   );
-  link.removeAttribute("aria-label");
-  link.setAttribute("aria-expanded", String(model.detailsOpen));
-  return link;
 }
 
-function linkButton(text: string, label: string, onClick: () => void): HTMLButtonElement {
-  return h("button", {
-    className: "link-btn inline",
-    text,
-    attrs: { type: "button", "aria-label": label },
-    on: { click: onClick },
-  });
-}
-
-/** Rare actions as a row of quiet links: "Copy · Details · Delete". */
-function quietLinks(links: readonly (HTMLButtonElement | false)[]): HTMLElement {
-  const shown = links.filter((link): link is HTMLButtonElement => link !== false);
-  const children: Child[] = shown.flatMap((link, index) => (index === 0 ? [link] : [" · ", link]));
-  return h("span", { className: "caption center links" }, children);
+function actionBar(buttons: readonly (HTMLButtonElement | false)[]): HTMLElement {
+  return h(
+    "div",
+    { className: "act-bar", attrs: { role: "toolbar", "aria-label": "Pin actions" } },
+    buttons,
+  );
 }
 
 /** The ways out besides the card's button, as quiet links. */

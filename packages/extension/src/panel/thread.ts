@@ -69,6 +69,32 @@ export function inboxGroup(state: PinState): InboxGroup {
   }
 }
 
+/**
+ * What Claude is doing with a pin it has not answered yet since it was last sent:
+ * waiting for it to be picked up (Sent), or squashing it (Seen). Null once Claude
+ * replies, the pin is Fixed, Blocked or Resolved, or the helper stopped following it.
+ */
+export type PinProgress = "waiting" | "squashing";
+
+export function pinProgress(tracking: PinTracking | undefined): PinProgress | null {
+  if (tracking === undefined || tracking.resolved || !tracking.inFlight) return null;
+  // A send or follow-up starts a fresh thread; anything in it is Claude's answer.
+  if (tracking.thread.length > 0) return null;
+  switch (tracking.status) {
+    case "sent":
+      return "waiting";
+    case "seen":
+      return "squashing";
+    default:
+      return null;
+  }
+}
+
+export const PROGRESS_LABELS: Record<PinProgress, string> = {
+  waiting: "Waiting for Claude to pick this up",
+  squashing: "Claude is squashing this",
+};
+
 export function buildThread(pin: StoredPin, tracking: PinTracking | undefined): ThreadItem[] {
   const items: ThreadItem[] = [{ kind: "comment", text: pin.comment, at: pin.createdAt }];
   if (tracking === undefined) return items;
