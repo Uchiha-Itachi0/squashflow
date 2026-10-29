@@ -12,6 +12,26 @@ describe("classifyTranscriptLine", () => {
     expect(classifyTranscriptLine(line, pin)).toBe("seen");
   });
 
+  it("sees a peer message a busy session took in mid-turn", () => {
+    // Shaped like Claude Code 2.1's record when the message arrives during a turn.
+    const absorbed = (origin: unknown): string =>
+      JSON.stringify({
+        type: "attachment",
+        attachment: {
+          type: "queued_command",
+          prompt: `<cross-session-message from-name="squashflow">Squashflow pin [${pin}]`,
+          commandMode: "prompt",
+          origin,
+          isMeta: true,
+        },
+      });
+    expect(classifyTranscriptLine(absorbed({ kind: "peer", name: "squashflow" }), pin)).toBe(
+      "seen",
+    );
+    expect(classifyTranscriptLine(absorbed({ kind: "human" }), pin)).toBeNull();
+    expect(classifyTranscriptLine(absorbed(undefined), pin)).toBeNull();
+  });
+
   it("does not treat a user-typed record as seen", () => {
     const line = JSON.stringify({ type: "user", message: { role: "user", content: `[${pin}]` } });
     expect(classifyTranscriptLine(line, pin)).toBeNull();

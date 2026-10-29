@@ -2,6 +2,8 @@
  * Delivery confirmation from the session transcript (JSONL). The inbox socket
  * sends no acknowledgement, so the transcript is the source of truth:
  * - a `user` record with a peer origin carrying the pin marker -> Seen by Claude
+ * - a `queued_command` attachment with a peer origin carrying the marker (the session
+ *   was busy and took the message in mid-turn) -> Seen by Claude
  * - a `system` "Held peer message" notice carrying the marker -> Approve in terminal
  * Claude's reply after that is picked out by `ReplyTracker` (reply.ts).
  */
@@ -69,6 +71,12 @@ export function classifyTranscriptLine(line: string, pinId: string): TranscriptS
       ? "seen"
       : null;
   }
+  // A busy session takes the message in mid-turn: it is written as a queued command
+  // attachment instead of a user record, and Claude reads it in the turn under way.
+  if (record.type === "attachment" && isAbsorbedPeerMessage(record.attachment)) {
+    const { origin, prompt } = record.attachment;
+    return textOf(origin.body).includes(marker) || textOf(prompt).includes(marker) ? "seen" : null;
+  }
   if (record.type === "system" && typeof record.content === "string") {
     return record.content.includes(HELD_NOTICE) && record.content.includes(marker) ? "held" : null;
   }
@@ -135,6 +143,17 @@ export function watchTranscript(
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isAbsorbedPeerMessage(
+  value: unknown,
+): value is { origin: Record<string, unknown>; prompt?: unknown } {
+  return (
+    isObject(value) &&
+    value.type === "queued_command" &&
+    isObject(value.origin) &&
+    value.origin.kind === "peer"
+  );
 }
 
 function textOf(value: unknown): string {

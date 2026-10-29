@@ -301,8 +301,8 @@ export class DeliveryService {
   }
 
   /**
-   * Follow the transcript until Claude's reply, or until it has been quiet for the
-   * watch lifetime (session gone, held message rejected). The lifetime restarts on
+   * Follow the transcript until a reply settles the pin (fixed or blocked), or until it
+   * has been quiet for the watch lifetime (session gone, held message rejected). The lifetime restarts on
    * every new line, so a long piece of work in a busy session is still followed.
    */
   private follow(
@@ -328,7 +328,6 @@ export class DeliveryService {
         const event = tracker.feed(line);
         if (tracker.finished) this.stopWatch(pinId);
         if (event !== null) this.onEvent(pinId, event);
-        else if (tracker.finished) this.republish(pinId);
       },
       this.options.pollMs,
     );
@@ -379,6 +378,8 @@ export class DeliveryService {
     const resume = this.resumeBlocked.get(current.id);
     this.resumeBlocked.delete(current.id);
     const after = this.afterReply(current, reply, resume);
+    // A pin back in its block waits for the user's next follow-up, not for more replies.
+    if (after.status === "blocked") this.stopWatch(current.id);
     const next: PinRecord = {
       ...after,
       thread: [...current.thread, message],
